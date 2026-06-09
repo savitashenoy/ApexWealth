@@ -1487,8 +1487,16 @@ function setLastUpdated(source = '') {
 
 async function fetchJsonSafe(url, options = {}) {
   const r = await fetch(url, options);
-  let d = null;
-  try { d = await r.json(); } catch(e) { d = {}; }
+  const contentType = (r.headers.get('content-type') || '').toLowerCase();
+  const raw = await r.text();
+  let d = {};
+  if (raw && contentType.includes('application/json')) {
+    try { d = JSON.parse(raw); } catch(e) { d = {}; }
+  } else if (raw) {
+    // Vercel returns HTML for routing/serverless errors. Do not expose JSON parser errors to users.
+    const compact = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    d = {error: compact ? compact.slice(0, 180) : `Request failed (${r.status})`};
+  }
   if (!r.ok) throw new Error((d && d.error) || `Request failed (${r.status})`);
   return d;
 }
@@ -1656,9 +1664,7 @@ async function doLogin(e) {
   const btn = document.getElementById('login-btn');
   btn.innerHTML = '<div class="spinner"></div>';
   try {
-    const r = await fetch(`${API}/login`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error);
+    const d = await fetchJsonSafe(`${API}/login`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
     USER = {user_id: d.user_id, email: d.email};
     sessionStorage.setItem('apex_user', JSON.stringify(USER));
     startApp();
@@ -1676,9 +1682,7 @@ async function doSignup(e) {
   document.getElementById('signup-error').textContent = '';
   if (password !== confirm) { document.getElementById('signup-error').textContent = 'Passwords do not match'; return; }
   try {
-    const r = await fetch(`${API}/signup`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error);
+    const d = await fetchJsonSafe(`${API}/signup`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
     USER = {user_id: d.user_id, email: d.email};
     sessionStorage.setItem('apex_user', JSON.stringify(USER));
     startApp();
@@ -1695,9 +1699,7 @@ async function doChangePassword(e) {
   document.getElementById('cp-error').textContent = '';
   document.getElementById('cp-success').textContent = '';
   try {
-    const r = await fetch(`${API}/change-password`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,old_password,new_password})});
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error);
+    const d = await fetchJsonSafe(`${API}/change-password`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,old_password,new_password})});
     document.getElementById('cp-success').textContent = '✓ Password updated successfully';
     setTimeout(() => switchAuthTab('login'), 2000);
   } catch(err) {

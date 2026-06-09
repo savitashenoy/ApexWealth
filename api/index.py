@@ -14,7 +14,16 @@ import numpy as np
 app = Flask(__name__, static_folder='../static', static_url_path='/static')
 CORS(app)
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
+# Vercel serverless filesystem note:
+# /var/task (the deployed project folder) is read-only at runtime. Writing JSON files
+# into the repo's data/ directory works locally but fails on Vercel and can return an
+# HTML 500 page, which the frontend then reports as: Unexpected token '<'.
+# Use /tmp on Vercel so auth/add/remove APIs always return JSON. For permanent
+# multi-user production storage, connect a persistent DB/KV later.
+PROJECT_DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data'))
+DATA_DIR = os.environ.get('APEXWEALTH_DATA_DIR')
+if not DATA_DIR:
+    DATA_DIR = '/tmp/apexwealth_data' if os.environ.get('VERCEL') else PROJECT_DATA_DIR
 os.makedirs(DATA_DIR, exist_ok=True)
 
 USERS_FILE = os.path.join(DATA_DIR, 'users.json')
@@ -41,14 +50,42 @@ NIFTY50_SYMBOLS = [
 def load_json(path, default=None):
     if default is None:
         default = {}
-    if os.path.exists(path):
-        with open(path) as f:
-            return json.load(f)
+    try:
+        if os.path.exists(path):
+            with open(path, encoding='utf-8') as f:
+                return json.load(f)
+    except Exception:
+        return default
     return default
 
 def save_json(path, data):
-    with open(path, 'w') as f:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=2, default=str)
+    os.replace(tmp_path, path)
+
+def get_request_json():
+    data = request.get_json(silent=True)
+    return data if isinstance(data, dict) else {}
+
+@app.errorhandler(404)
+def json_404(error):
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'API endpoint not found', 'path': request.path}), 404
+    return send_from_directory('..', 'index.html')
+
+@app.errorhandler(405)
+def json_405(error):
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'Method not allowed', 'path': request.path, 'method': request.method}), 405
+    return jsonify({'error': 'Method not allowed'}), 405
+
+@app.errorhandler(Exception)
+def json_exception(error):
+    if request.path.startswith('/api/'):
+        return jsonify({'error': str(error) or 'Server error'}), 500
+    raise error
 
 def hash_password(pwd):
     return hashlib.sha256(pwd.encode()).hexdigest()
@@ -572,11 +609,29 @@ def fetch_return_profile(symbol, quote=None):
 def index():
     return send_from_directory('..', 'index.html')
 
+@app.route('/api/health/storage')
+def health_storage():
+    test_file = os.path.join(DATA_DIR, '_write_test.json')
+    writable = False
+    err = None
+    try:
+        save_json(test_file, {'ok': True, 'ts': datetime.now().isoformat()})
+        writable = True
+    except Exception as e:
+        err = str(e)
+    return jsonify({
+        'ok': writable,
+        'data_dir': DATA_DIR,
+        'vercel': bool(os.environ.get('VERCEL')),
+        'writable': writable,
+        'error': err
+    })
+
 # ─── AUTH ─────────────────────────────────────────────────────────────────────
 
 @app.route('/api/signup', methods=['POST'])
 def signup():
-    data = request.json
+    data = get_request_json()
     email = data.get('email', '').lower().strip()
     password = data.get('password', '')
     if not email or not password:
@@ -591,7 +646,7 @@ def signup():
 
 @app.route('/api/login', methods=['POST'])
 def login():
-    data = request.json
+    data = get_request_json()
     email = data.get('email', '').lower().strip()
     password = data.get('password', '')
     users = load_json(USERS_FILE)
@@ -602,7 +657,7 @@ def login():
 
 @app.route('/api/change-password', methods=['POST'])
 def change_password():
-    data = request.json
+    data = get_request_json()
     email = data.get('email', '').lower().strip()
     old_pwd = data.get('old_password', '')
     new_pwd = data.get('new_password', '')
@@ -641,7 +696,7 @@ def get_holdings(user_id):
 
 @app.route('/api/holdings/<user_id>', methods=['POST'])
 def add_holding(user_id):
-    data = request.json
+    data = get_request_json()
     portfolios = load_json(PORTFOLIOS_FILE)
     if user_id not in portfolios:
         portfolios[user_id] = []
@@ -661,7 +716,7 @@ def add_holding(user_id):
 
 @app.route('/api/holdings/<user_id>/<holding_id>', methods=['PUT'])
 def edit_holding(user_id, holding_id):
-    data = request.json
+    data = get_request_json()
     portfolios = load_json(PORTFOLIOS_FILE)
     holdings = portfolios.get(user_id, [])
     for i, h in enumerate(holdings):
@@ -693,7 +748,7 @@ def delete_holding_post(user_id, holding_id):
 
 @app.route('/api/sell/<user_id>/<holding_id>', methods=['POST'])
 def sell_holding(user_id, holding_id):
-    data = request.json
+    data = get_request_json()
     sell_price = float(data.get('sell_price', 0))
     portfolios = load_json(PORTFOLIOS_FILE)
     holdings = portfolios.get(user_id, [])
@@ -761,7 +816,7 @@ def get_watchlist(user_id):
 
 @app.route('/api/watchlist/<user_id>', methods=['POST'])
 def add_watchlist(user_id):
-    data = request.json
+    data = get_request_json()
     watchlists = load_json(WATCHLISTS_FILE)
     if user_id not in watchlists:
         watchlists[user_id] = []
