@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>ApexWealth Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#edeae2;--card:#f5f2eb;--card2:#ede9df;--border:#d6d0c6;--border2:#c4bdb0;--accent:#2a6496;--green:#2E6F40;--red:#FF2C2C;--dim:#968f84;--text:#1a1714;--text-secondary:#5c574f;--shadow:rgba(0,0,0,.12)}
+body{font-family:'Syne',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:13px}
+.admin-shell{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;position:relative;overflow:hidden}.admin-shell::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(42,100,150,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(42,100,150,.035) 1px,transparent 1px);background-size:42px 42px;pointer-events:none}.admin-login{width:420px;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:38px;box-shadow:0 30px 80px var(--shadow);position:relative;z-index:2}.admin-login::before,.panel::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--accent),var(--green));border-radius:16px 16px 0 0}.brand{text-align:center;margin-bottom:28px}.brand-title{font-size:2rem;font-weight:800;letter-spacing:-1px;background:linear-gradient(135deg,var(--accent),var(--green));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}.brand-sub{font-family:'JetBrains Mono',monospace;color:var(--dim);font-size:.72rem;text-transform:uppercase;letter-spacing:2.5px;margin-top:5px}.field{display:flex;flex-direction:column;gap:6px;margin-bottom:16px}.label{font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:1.4px;color:var(--dim)}.input{height:39px;border:1px solid var(--border2);background:var(--bg);border-radius:8px;padding:0 12px;color:var(--text);font-family:'JetBrains Mono',monospace;outline:none}.input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(42,100,150,.1)}.btn{height:38px;border:0;border-radius:8px;padding:0 16px;cursor:pointer;font-family:'Syne',sans-serif;font-weight:700;display:inline-flex;align-items:center;justify-content:center;gap:8px;transition:.2s}.btn-primary{background:var(--accent);color:#fff}.btn-primary:hover{filter:brightness(.94);transform:translateY(-1px)}.btn-outline{background:transparent;border:1px solid var(--border2);color:var(--text-secondary)}.btn-outline:hover{border-color:var(--accent);color:var(--accent)}.btn-danger{background:rgba(255,44,44,.08);border:1px solid rgba(255,44,44,.25);color:var(--red)}.btn-icon{width:30px;height:30px;border-radius:7px;border:1px solid var(--border2);background:var(--card);color:var(--text-secondary);cursor:pointer}.btn-icon:hover{color:var(--accent);border-color:var(--accent)}.btn-icon.delete:hover{color:var(--red);border-color:var(--red)}.msg{font-family:'JetBrains Mono',monospace;font-size:.74rem;margin-top:12px;min-height:18px;text-align:center}.msg.err{color:var(--red)}.msg.ok{color:var(--green)}
+#admin-app{display:none;min-height:100vh}.topbar{height:60px;background:var(--card);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 24px;position:sticky;top:0;z-index:10}.top-title{font-size:1.15rem;font-weight:800;color:var(--accent)}.top-meta{font-family:'JetBrains Mono',monospace;color:var(--dim);font-size:.75rem}.layout{display:grid;grid-template-columns:240px 1fr;min-height:calc(100vh - 60px)}.sidebar{background:var(--card);border-right:1px solid var(--border);padding:18px}.nav-btn{width:100%;height:42px;border:1px solid var(--border2);background:transparent;color:var(--text-secondary);border-radius:8px;margin-bottom:8px;text-align:left;padding:0 14px;font-family:'Syne',sans-serif;font-weight:700;cursor:pointer}.nav-btn.active,.nav-btn:hover{background:rgba(42,100,150,.1);border-color:var(--accent);color:var(--accent)}.content{padding:24px}.panel{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:22px;margin-bottom:18px;position:relative;box-shadow:0 4px 14px rgba(0,0,0,.04)}.panel-title{font-size:.8rem;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:var(--text);margin-bottom:16px;display:flex;align-items:center;gap:9px}.form-row{display:grid;grid-template-columns:1fr 1fr auto;gap:12px;align-items:end}.toolbar{display:flex;gap:10px;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap}.search{max-width:340px;flex:1}.table-wrap{border:1px solid var(--border);border-radius:10px;overflow:auto}table{width:100%;border-collapse:collapse;min-width:760px}thead th{background:var(--card2);padding:11px 12px;text-align:left;color:var(--text-secondary);font-size:.68rem;text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid var(--border2)}tbody td{padding:11px 12px;border-bottom:1px solid var(--border);color:var(--text);font-family:'JetBrains Mono',monospace;font-size:.78rem}tbody tr:hover td{background:rgba(42,100,150,.05)}tbody tr:last-child td{border-bottom:none}.actions{display:flex;gap:6px}.muted{color:var(--dim)}.empty{padding:32px;text-align:center;color:var(--dim);font-family:'JetBrains Mono',monospace}.modal-backdrop{position:fixed;inset:0;background:rgba(26,23,20,.55);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}.modal-backdrop.open{display:flex}.modal{width:420px;background:var(--card);border:1px solid var(--border2);border-radius:14px;padding:22px;box-shadow:0 30px 80px rgba(0,0,0,.2)}.modal-title{font-weight:800;margin-bottom:16px;color:var(--accent)}.modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}@media(max-width:800px){.layout{grid-template-columns:1fr}.sidebar{border-right:none;border-bottom:1px solid var(--border)}.form-row{grid-template-columns:1fr}.topbar{height:auto;gap:10px;align-items:flex-start;flex-direction:column;padding:14px 18px}}
+</style>
+</head>
+<body>
+<div class="admin-shell" id="admin-login-page">
+  <div class="admin-login">
+    <div class="brand"><div class="brand-title">ApexWealth</div><div class="brand-sub">Admin Control</div></div>
+    <form id="admin-login-form">
+      <div class="field"><label class="label">UID</label><input id="admin-uid" class="input" autocomplete="username" placeholder="superuser"/></div>
+      <div class="field"><label class="label">Password</label><input id="admin-password" class="input" type="password" autocomplete="current-password"/></div>
+      <button class="btn btn-primary" style="width:100%" type="submit"><i class="fa-solid fa-lock-open"></i> Login</button>
+      <div id="login-msg" class="msg"></div>
+    </form>
+  </div>
+</div>
+
+<div id="admin-app">
+  <div class="topbar">
+    <div><div class="top-title">ApexWealth Admin</div><div class="top-meta">Super user account · Members management</div></div>
+    <button class="btn btn-outline" onclick="adminLogout()"><i class="fa-solid fa-right-from-bracket"></i> Logout</button>
+  </div>
+  <div class="layout">
+    <aside class="sidebar"><button class="nav-btn active"><i class="fa-solid fa-users"></i> Create Members</button></aside>
+    <main class="content">
+      <section class="panel">
+        <div class="panel-title"><i class="fa-solid fa-user-plus"></i> Create New User</div>
+        <form id="create-user-form" class="form-row">
+          <div class="field"><label class="label">User Name</label><input id="new-username" class="input" required/></div>
+          <div class="field"><label class="label">Password</label><input id="new-password" class="input" type="text" required/></div>
+          <button class="btn btn-primary" type="submit"><i class="fa-solid fa-plus"></i> Create</button>
+        </form>
+        <div id="create-msg" class="msg"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title"><i class="fa-solid fa-user-gear"></i> Managing User Accounts</div>
+        <div class="toolbar">
+          <div class="field search" style="margin-bottom:0"><label class="label">Search for Users</label><input id="user-search" class="input" placeholder="Search User Name..." oninput="debouncedLoadUsers()"/></div>
+          <button class="btn btn-outline" onclick="loadUsers()"><i class="fa-solid fa-rotate"></i> Refresh</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>ID</th><th>UserName</th><th>Password</th><th>User Since</th><th>Actions</th></tr></thead>
+            <tbody id="users-tbody"><tr><td colspan="5" class="empty">Login to load users</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="edit-modal">
+  <div class="modal">
+    <div class="modal-title"><i class="fa-solid fa-pen-to-square"></i> Edit User</div>
+    <input type="hidden" id="edit-id"/>
+    <div class="field"><label class="label">User Name</label><input id="edit-username" class="input"/></div>
+    <div class="field"><label class="label">New Password</label><input id="edit-password" class="input" type="text" placeholder="Leave blank to keep current password"/></div>
+    <div id="edit-msg" class="msg"></div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeEditModal()">Cancel</button><button class="btn btn-primary" onclick="saveUserEdit()">Save</button></div>
+  </div>
+</div>
+
+<script>
+let adminToken = sessionStorage.getItem('apex_admin_token') || '';
+let userLoadTimer = null;
+
+function showLogin(){document.getElementById('admin-login-page').style.display='flex';document.getElementById('admin-app').style.display='none'}
+function showApp(){document.getElementById('admin-login-page').style.display='none';document.getElementById('admin-app').style.display='block';loadUsers()}
+function setMsg(id, text, type=''){const el=document.getElementById(id);el.textContent=text||'';el.className='msg '+type}
+async function apiFetch(url, options={}){
+  const headers = Object.assign({'Content-Type':'application/json'}, options.headers || {});
+  if(adminToken) headers.Authorization = 'Bearer '+adminToken;
+  const res = await fetch(url, Object.assign({}, options, {headers}));
+  const text = await res.text();
+  let data;
+  try { data = text ? JSON.parse(text) : {}; } catch(e) { throw new Error('Server returned non-JSON response. Check deployment route: '+url); }
+  if(!res.ok || data.ok === false) throw new Error(data.error || data.message || 'Request failed');
+  return data;
+}
+
+document.getElementById('admin-login-form').addEventListener('submit', async e => {
+  e.preventDefault(); setMsg('login-msg','Checking...');
+  try{
+    const data = await apiFetch('/api/admin/login', {method:'POST', body:JSON.stringify({uid:document.getElementById('admin-uid').value, password:document.getElementById('admin-password').value})});
+    adminToken = data.token; sessionStorage.setItem('apex_admin_token', adminToken); setMsg('login-msg','Login successful','ok'); showApp();
+  }catch(err){setMsg('login-msg', err.message, 'err')}
+});
+
+document.getElementById('create-user-form').addEventListener('submit', async e => {
+  e.preventDefault(); setMsg('create-msg','Creating...');
+  try{
+    await apiFetch('/api/admin/users', {method:'POST', body:JSON.stringify({username:document.getElementById('new-username').value, password:document.getElementById('new-password').value})});
+    document.getElementById('new-username').value=''; document.getElementById('new-password').value=''; setMsg('create-msg','User created','ok'); loadUsers();
+  }catch(err){setMsg('create-msg',err.message,'err')}
+});
+
+function debouncedLoadUsers(){clearTimeout(userLoadTimer);userLoadTimer=setTimeout(loadUsers,250)}
+async function loadUsers(){
+  const tbody=document.getElementById('users-tbody'); tbody.innerHTML='<tr><td colspan="5" class="empty">Loading users...</td></tr>';
+  try{
+    const q=encodeURIComponent(document.getElementById('user-search').value||'');
+    const data=await apiFetch('/api/admin/users?search='+q);
+    const users=data.users||[];
+    if(!users.length){tbody.innerHTML='<tr><td colspan="5" class="empty">No users found</td></tr>';return;}
+    tbody.innerHTML=users.map(u=>`<tr><td>${esc(u.id)}</td><td>${esc(u.username)}</td><td>${esc(u.password)}</td><td>${formatDate(u.user_since)}</td><td><div class="actions"><button class="btn-icon" title="Edit" onclick='openEditModal(${JSON.stringify(u)})'><i class="fa-solid fa-pen"></i></button><button class="btn-icon delete" title="Delete" onclick="deleteUser('${escAttr(u.id)}','${escAttr(u.username)}')"><i class="fa-solid fa-trash"></i></button></div></td></tr>`).join('');
+  }catch(err){tbody.innerHTML=`<tr><td colspan="5" class="empty">${esc(err.message)}</td></tr>`;}
+}
+function openEditModal(u){document.getElementById('edit-id').value=u.id;document.getElementById('edit-username').value=u.username||'';document.getElementById('edit-password').value='';setMsg('edit-msg','');document.getElementById('edit-modal').classList.add('open')}
+function closeEditModal(){document.getElementById('edit-modal').classList.remove('open')}
+async function saveUserEdit(){setMsg('edit-msg','Saving...');try{await apiFetch('/api/admin/users/'+encodeURIComponent(document.getElementById('edit-id').value),{method:'PUT',body:JSON.stringify({username:document.getElementById('edit-username').value,password:document.getElementById('edit-password').value})});setMsg('edit-msg','Saved','ok');closeEditModal();loadUsers();}catch(err){setMsg('edit-msg',err.message,'err')}}
+async function deleteUser(id, username){if(!confirm('Delete user '+username+' and all related portfolio/watchlist data?'))return;try{await apiFetch('/api/admin/users/'+encodeURIComponent(id),{method:'DELETE'});loadUsers();}catch(err){alert(err.message)}}
+function adminLogout(){sessionStorage.removeItem('apex_admin_token');adminToken='';showLogin()}
+function esc(v){return String(v??'').replace(/[&<>"']/g,s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]))}
+function escAttr(v){return esc(v).replace(/`/g,'&#96;')}
+function formatDate(v){if(!v)return '<span class="muted">—</span>';try{return new Date(v).toLocaleString('en-IN')}catch(e){return esc(v)}}
+if(adminToken) showApp(); else showLogin();
+</script>
+</body>
+</html>

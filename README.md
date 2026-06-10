@@ -79,3 +79,25 @@ apexwealth/
 | GET | /api/market/indices | NIFTY/SENSEX indices |
 | GET | /api/market/top-movers | Top gainers/losers |
 | GET | /api/chart/:symbol?period=1mo | Historical OHLCV data |
+
+## Admin Page
+
+Open the admin panel after deployment at:
+
+```text
+https://your-app.vercel.app/Admin
+```
+
+Default super user login:
+
+```text
+UID: superuser
+Password: June021999
+```
+
+The Admin panel includes a **Create Members** tab with:
+
+- Create New User: User Name, Password
+- Managing User Accounts: search, list users, edit password/user name, delete user
+
+Passwords are stored as SHA-256 hashes for app compatibility and are shown as masked values in the Admin table. Use the edit icon to reset a user password.

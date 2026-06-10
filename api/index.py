@@ -1788,5 +1788,215 @@ def yahoo_health():
     except Exception as e:
         return jsonify({'ok': False, 'method': 'yfinance_serverless', 'symbol': symbol.upper(), 'error': str(e), 'elapsed_ms': int((time.time() - started) * 1000)}), 500
 
+
+# ─── ADMIN PANEL ─────────────────────────────────────────────────────────────
+ADMIN_UID = os.environ.get('APEXWEALTH_ADMIN_UID', 'superuser')
+ADMIN_PASSWORD = os.environ.get('APEXWEALTH_ADMIN_PASSWORD', 'June021999')
+ADMIN_TOKEN = hashlib.sha256(f'{ADMIN_UID}:{ADMIN_PASSWORD}:apexwealth-admin'.encode()).hexdigest()
+
+def _admin_authorized():
+    auth = request.headers.get('Authorization', '')
+    if auth.startswith('Bearer ') and auth.split(' ', 1)[1] == ADMIN_TOKEN:
+        return True
+    token = request.headers.get('X-Admin-Token', '')
+    return token == ADMIN_TOKEN
+
+def require_admin():
+    if not _admin_authorized():
+        return jsonify({'error': 'Admin authorization required'}), 401
+    return None
+
+def _user_display(row):
+    d = _row_to_dict(row) if isinstance(row, dict) else dict(row)
+    return {
+        'id': d.get('id'),
+        'username': d.get('email'),
+        'password': '••••••••',
+        'user_since': _dt_to_str(d.get('created'))
+    }
+
+def db_admin_list_users(search=''):
+    if not init_db():
+        raise RuntimeError(DB_LAST_ERROR or 'Database is not initialized')
+    like = f'%{search.lower()}%'
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            if search:
+                cur.execute('SELECT id, email, password, created FROM users WHERE LOWER(email) LIKE %s ORDER BY created DESC, email', (like,))
+            else:
+                cur.execute('SELECT id, email, password, created FROM users ORDER BY created DESC, email')
+            rows = cur.fetchall() or []
+    return [_user_display(r) for r in rows]
+
+def db_admin_get_user_by_id(user_id):
+    if not init_db():
+        return None
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute('SELECT id, email, password, created FROM users WHERE id=%s', (user_id,))
+            row = cur.fetchone()
+    return _row_to_dict(row) if row else None
+
+def db_admin_create_user(username, password):
+    username = str(username or '').lower().strip()
+    if not username or not password:
+        raise ValueError('User Name and Password are required')
+    if db_configured():
+        if db_get_user(username):
+            raise ValueError('User already exists')
+        u = db_create_user(username, hash_password(password))
+        user = db_get_user(username)
+        return _user_display(user)
+    users = load_json(USERS_FILE)
+    if username in users:
+        raise ValueError('User already exists')
+    user_id = str(uuid.uuid4())
+    users[username] = {'id': user_id, 'email': username, 'password': hash_password(password), 'created': str(datetime.now())}
+    save_json(USERS_FILE, users)
+    return {'id': user_id, 'username': username, 'password': '••••••••', 'user_since': users[username]['created']}
+
+def db_admin_update_user(user_id, username=None, password=None):
+    username = str(username or '').lower().strip() if username is not None else None
+    if db_configured():
+        if not init_db():
+            raise RuntimeError(DB_LAST_ERROR or 'Database is not initialized')
+        existing = db_admin_get_user_by_id(user_id)
+        if not existing:
+            raise ValueError('User not found')
+        updates, vals = [], []
+        if username:
+            duplicate = db_get_user(username)
+            if duplicate and duplicate.get('id') != user_id:
+                raise ValueError('User Name already exists')
+            updates.append('email=%s'); vals.append(username)
+        if password:
+            updates.append('password=%s'); vals.append(hash_password(password))
+        if updates:
+            vals.append(user_id)
+            with db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"UPDATE users SET {', '.join(updates)} WHERE id=%s", vals)
+        updated = db_admin_get_user_by_id(user_id)
+        return _user_display(updated)
+    users = load_json(USERS_FILE)
+    found_key = None
+    for k, v in users.items():
+        if v.get('id') == user_id:
+            found_key = k; break
+    if not found_key:
+        raise ValueError('User not found')
+    record = users[found_key]
+    if username and username != found_key:
+        if username in users:
+            raise ValueError('User Name already exists')
+        users.pop(found_key)
+        record['email'] = username
+        found_key = username
+        users[found_key] = record
+    if password:
+        users[found_key]['password'] = hash_password(password)
+    save_json(USERS_FILE, users)
+    return {'id': user_id, 'username': found_key, 'password': '••••••••', 'user_since': users[found_key].get('created')}
+
+def db_admin_delete_user(user_id):
+    if db_configured():
+        if not init_db():
+            raise RuntimeError(DB_LAST_ERROR or 'Database is not initialized')
+        with db_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute('DELETE FROM trades WHERE user_id=%s', (user_id,))
+                cur.execute('DELETE FROM watchlist WHERE user_id=%s', (user_id,))
+                cur.execute('DELETE FROM holdings WHERE user_id=%s', (user_id,))
+                cur.execute('DELETE FROM users WHERE id=%s', (user_id,))
+                return cur.rowcount
+    users = load_json(USERS_FILE)
+    portfolios = load_json(PORTFOLIOS_FILE)
+    watchlists = load_json(WATCHLISTS_FILE)
+    trades = load_json(TRADES_FILE)
+    found_key = None
+    for k, v in users.items():
+        if v.get('id') == user_id:
+            found_key = k; break
+    if not found_key:
+        return 0
+    users.pop(found_key, None)
+    portfolios.pop(user_id, None); watchlists.pop(user_id, None); trades.pop(user_id, None)
+    save_json(USERS_FILE, users); save_json(PORTFOLIOS_FILE, portfolios); save_json(WATCHLISTS_FILE, watchlists); save_json(TRADES_FILE, trades)
+    return 1
+
+@app.route('/Admin')
+@app.route('/admin')
+def admin_page():
+    return send_from_directory('..', 'admin.html')
+
+@app.route('/api/admin/login', methods=['POST'])
+def admin_login():
+    data = get_request_json()
+    uid = str(data.get('uid', '')).strip()
+    password = str(data.get('password', ''))
+    if uid == ADMIN_UID and password == ADMIN_PASSWORD:
+        return jsonify({'ok': True, 'message': 'Admin login successful', 'token': ADMIN_TOKEN})
+    return jsonify({'ok': False, 'error': 'Invalid admin credentials'}), 401
+
+@app.route('/api/admin/users', methods=['GET'])
+def admin_list_users():
+    auth_error = require_admin()
+    if auth_error:
+        return auth_error
+    try:
+        search = request.args.get('search', '').strip()
+        users = db_admin_list_users(search) if db_configured() else []
+        if not db_configured():
+            raw = load_json(USERS_FILE)
+            for _, v in raw.items():
+                username = v.get('email') or _
+                if search and search.lower() not in str(username).lower():
+                    continue
+                users.append({'id': v.get('id'), 'username': username, 'password': '••••••••', 'user_since': v.get('created')})
+        return jsonify({'ok': True, 'users': users, 'storage': 'neon' if db_configured() else 'json-fallback'})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.route('/api/admin/users', methods=['POST'])
+def admin_create_user():
+    auth_error = require_admin()
+    if auth_error:
+        return auth_error
+    data = get_request_json()
+    try:
+        user = db_admin_create_user(data.get('username'), data.get('password'))
+        return jsonify({'ok': True, 'message': 'User created', 'user': user})
+    except ValueError as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.route('/api/admin/users/<user_id>', methods=['PUT'])
+def admin_update_user(user_id):
+    auth_error = require_admin()
+    if auth_error:
+        return auth_error
+    data = get_request_json()
+    try:
+        user = db_admin_update_user(user_id, data.get('username'), data.get('password'))
+        return jsonify({'ok': True, 'message': 'User updated', 'user': user})
+    except ValueError as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.route('/api/admin/users/<user_id>', methods=['DELETE'])
+def admin_delete_user(user_id):
+    auth_error = require_admin()
+    if auth_error:
+        return auth_error
+    try:
+        deleted = db_admin_delete_user(user_id)
+        if not deleted:
+            return jsonify({'ok': False, 'error': 'User not found'}), 404
+        return jsonify({'ok': True, 'message': 'User deleted'})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
