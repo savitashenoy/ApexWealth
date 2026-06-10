@@ -16,13 +16,13 @@ A full-stack portfolio management app with Flask + yfinance backend and a dark, 
 ## Tech Stack
 - **Backend:** Flask + yfinance (NSE live data via `.NS` suffix)
 - **Frontend:** Vanilla HTML/CSS/JS + Chart.js
-- **Storage:** JSON files (users.json, portfolios.json, watchlists.json, trades.json)
+- **Storage:** Neon PostgreSQL on Vercel via `DATABASE_URL`; JSON fallback for local development
 - **Stock Universe:** 2388 NSE equities (from EQUITY_completed_with_Industry.csv)
 
 ## Local Development
 
 ```bash
-pip install flask flask-cors yfinance
+pip install -r requirements.txt
 cd api
 python index.py
 # Open http://localhost:5000
@@ -34,10 +34,13 @@ python index.py
 2. From project root: `vercel`
 3. Follow prompts — it auto-detects Python backend + static frontend
 
-### Notes for Vercel
-- The `data/` directory for JSON storage won't persist across serverless invocations on Vercel's free tier.
-- For persistent storage on Vercel, replace JSON files with a free database like Supabase, PlanetScale, or MongoDB Atlas.
-- Alternatively, use Vercel KV (Redis) or Vercel Postgres add-ons.
+### Notes for Vercel + Neon persistence
+- Vercel serverless files are temporary, so this build uses Neon PostgreSQL when `DATABASE_URL` is configured.
+- Create a free Neon database and add the pooled connection string in Vercel Environment Variables:
+  `DATABASE_URL=postgresql://USER:PASSWORD@HOST.neon.tech/DBNAME?sslmode=require`
+- Tables are created automatically on first API request.
+- Test storage after deploy: `/api/health/storage`
+- Local development still uses JSON fallback if `DATABASE_URL` is not set.
 
 ## Project Structure
 ```

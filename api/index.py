@@ -10,6 +10,12 @@ except Exception:  # local/dev fallback if curl_cffi is unavailable
 import yfinance as yf
 import pandas as pd
 import numpy as np
+try:
+    import psycopg
+    from psycopg.rows import dict_row
+except Exception:
+    psycopg = None
+    dict_row = None
 
 app = Flask(__name__, static_folder='../static', static_url_path='/static')
 CORS(app)
@@ -30,6 +36,236 @@ USERS_FILE = os.path.join(DATA_DIR, 'users.json')
 PORTFOLIOS_FILE = os.path.join(DATA_DIR, 'portfolios.json')
 WATCHLISTS_FILE = os.path.join(DATA_DIR, 'watchlists.json')
 TRADES_FILE = os.path.join(DATA_DIR, 'trades.json')
+
+
+# ─── PERSISTENT STORAGE: Neon PostgreSQL on Vercel ───────────────────────────
+# Set one of these env vars in Vercel from your Neon dashboard:
+# DATABASE_URL or POSTGRES_URL or NEON_DATABASE_URL
+DATABASE_URL = (
+    os.environ.get('DATABASE_URL')
+    or os.environ.get('POSTGRES_URL')
+    or os.environ.get('NEON_DATABASE_URL')
+)
+DB_INIT_DONE = False
+DB_LAST_ERROR = None
+
+def db_configured():
+    return bool(DATABASE_URL and psycopg is not None)
+
+def db_connect():
+    if not db_configured():
+        raise RuntimeError('DATABASE_URL/POSTGRES_URL is not configured or psycopg is not installed')
+    return psycopg.connect(DATABASE_URL, autocommit=True, row_factory=dict_row)
+
+def init_db():
+    """Create Neon tables once per cold start. Safe to run repeatedly."""
+    global DB_INIT_DONE, DB_LAST_ERROR
+    if DB_INIT_DONE or not db_configured():
+        return DB_INIT_DONE
+    schema = [
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            email TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            created TIMESTAMPTZ DEFAULT NOW()
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS holdings (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            name TEXT,
+            buy_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+            qty DOUBLE PRECISION NOT NULL DEFAULT 0,
+            date TEXT,
+            industry TEXT,
+            sector TEXT,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_holdings_user ON holdings(user_id)",
+        """
+        CREATE TABLE IF NOT EXISTS watchlist (
+            user_id TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            name TEXT,
+            industry TEXT,
+            added TEXT,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            PRIMARY KEY (user_id, symbol)
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_watchlist_user ON watchlist(user_id)",
+        """
+        CREATE TABLE IF NOT EXISTS trades (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            name TEXT,
+            buy_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+            sell_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+            qty DOUBLE PRECISION NOT NULL DEFAULT 0,
+            buy_date TEXT,
+            sell_date TEXT,
+            pnl DOUBLE PRECISION NOT NULL DEFAULT 0,
+            pnl_pct DOUBLE PRECISION NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_trades_user ON trades(user_id)"
+    ]
+    try:
+        with db_connect() as conn:
+            with conn.cursor() as cur:
+                for stmt in schema:
+                    cur.execute(stmt)
+        DB_INIT_DONE = True
+        DB_LAST_ERROR = None
+        return True
+    except Exception as e:
+        DB_LAST_ERROR = str(e)
+        return False
+
+def _dt_to_str(value):
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    return value
+
+def _row_to_dict(row):
+    return {k: _dt_to_str(v) for k, v in dict(row).items()}
+
+def db_get_user(email):
+    if not init_db():
+        return None
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute('SELECT id, email, password, created FROM users WHERE email=%s', (email,))
+            row = cur.fetchone()
+    return _row_to_dict(row) if row else None
+
+def db_create_user(email, password_hash):
+    if not init_db():
+        raise RuntimeError(DB_LAST_ERROR or 'Database is not initialized')
+    user_id = str(uuid.uuid4())
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute('INSERT INTO users (id, email, password, created) VALUES (%s,%s,%s,NOW())', (user_id, email, password_hash))
+    return {'id': user_id, 'email': email}
+
+def db_update_password(email, password_hash):
+    if not init_db():
+        raise RuntimeError(DB_LAST_ERROR or 'Database is not initialized')
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute('UPDATE users SET password=%s WHERE email=%s', (password_hash, email))
+            return cur.rowcount
+
+def db_get_holdings(user_id):
+    if not init_db():
+        return None
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute('SELECT id, symbol, name, buy_price, qty, date, industry, sector FROM holdings WHERE user_id=%s ORDER BY created_at, symbol', (user_id,))
+            rows = cur.fetchall() or []
+    return [_row_to_dict(r) for r in rows]
+
+def db_add_holding(user_id, holding):
+    if not init_db():
+        raise RuntimeError(DB_LAST_ERROR or 'Database is not initialized')
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute('INSERT INTO holdings (id, user_id, symbol, name, buy_price, qty, date, industry, sector) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)', (holding['id'], user_id, holding['symbol'], holding.get('name'), holding['buy_price'], holding['qty'], holding.get('date'), holding.get('industry',''), holding.get('sector','')))
+    return holding
+
+def db_update_holding(user_id, holding_id, buy_price=None, qty=None, holding_date=None):
+    if not init_db():
+        return None
+    updates, vals = [], []
+    if buy_price is not None:
+        updates.append('buy_price=%s'); vals.append(float(buy_price))
+    if qty is not None:
+        updates.append('qty=%s'); vals.append(float(qty))
+    if holding_date is not None:
+        updates.append('date=%s'); vals.append(holding_date)
+    if not updates:
+        return 0
+    vals.extend([user_id, holding_id])
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"UPDATE holdings SET {', '.join(updates)} WHERE user_id=%s AND id=%s", vals)
+            return cur.rowcount
+
+def db_delete_holding(user_id, holding_id):
+    if not init_db():
+        return None
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute('DELETE FROM holdings WHERE user_id=%s AND id=%s', (user_id, holding_id))
+            return cur.rowcount
+
+def db_get_holding(user_id, holding_id):
+    if not init_db():
+        return None
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute('SELECT id, symbol, name, buy_price, qty, date, industry, sector FROM holdings WHERE user_id=%s AND id=%s', (user_id, holding_id))
+            row = cur.fetchone()
+    return _row_to_dict(row) if row else None
+
+def db_set_holding_qty_or_delete(user_id, holding_id, new_qty):
+    if new_qty <= 0:
+        return db_delete_holding(user_id, holding_id)
+    if not init_db():
+        return None
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute('UPDATE holdings SET qty=%s WHERE user_id=%s AND id=%s', (float(new_qty), user_id, holding_id))
+            return cur.rowcount
+
+def db_get_watchlist(user_id):
+    if not init_db():
+        return None
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute('SELECT symbol, name, industry, added FROM watchlist WHERE user_id=%s ORDER BY created_at, symbol', (user_id,))
+            rows = cur.fetchall() or []
+    return [_row_to_dict(r) for r in rows]
+
+def db_add_watchlist(user_id, item):
+    if not init_db():
+        raise RuntimeError(DB_LAST_ERROR or 'Database is not initialized')
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute('INSERT INTO watchlist (user_id, symbol, name, industry, added) VALUES (%s,%s,%s,%s,%s) ON CONFLICT (user_id, symbol) DO NOTHING', (user_id, item['symbol'], item.get('name'), item.get('industry',''), item.get('added')))
+            return cur.rowcount
+
+def db_delete_watchlist(user_id, symbol):
+    if not init_db():
+        return None
+    target = _strip_exchange_suffix(symbol)
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM watchlist WHERE user_id=%s AND REPLACE(REPLACE(UPPER(symbol), '.NS', ''), '.BO', '')=%s", (user_id, target))
+            return cur.rowcount
+
+def db_get_trades(user_id):
+    if not init_db():
+        return None
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute('SELECT id, symbol, name, buy_price, sell_price, qty, buy_date, sell_date, pnl, pnl_pct FROM trades WHERE user_id=%s ORDER BY created_at DESC', (user_id,))
+            rows = cur.fetchall() or []
+    return [_row_to_dict(r) for r in rows]
+
+def db_add_trade(user_id, trade):
+    if not init_db():
+        raise RuntimeError(DB_LAST_ERROR or 'Database is not initialized')
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute('INSERT INTO trades (id, user_id, symbol, name, buy_price, sell_price, qty, buy_date, sell_date, pnl, pnl_pct) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)', (trade['id'], user_id, trade['symbol'], trade.get('name'), trade['buy_price'], trade['sell_price'], trade['qty'], trade.get('buy_date'), trade.get('sell_date'), trade['pnl'], trade['pnl_pct']))
+    return trade
 
 TOP_MOVERS_CACHE = {'ts': 0, 'data': None}
 TOP_MOVERS_TTL = 300
@@ -611,6 +847,28 @@ def index():
 
 @app.route('/api/health/storage')
 def health_storage():
+    db_ok = False
+    db_error = None
+    if db_configured():
+        db_ok = init_db()
+        db_error = DB_LAST_ERROR
+        if db_ok:
+            try:
+                with db_connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute('SELECT COUNT(*) AS user_count FROM users')
+                        user_count = cur.fetchone().get('user_count', 0)
+                return jsonify({
+                    'ok': True,
+                    'storage': 'neon',
+                    'database_configured': True,
+                    'tables_ready': True,
+                    'user_count': user_count,
+                    'vercel': bool(os.environ.get('VERCEL'))
+                })
+            except Exception as e:
+                db_error = str(e)
+
     test_file = os.path.join(DATA_DIR, '_write_test.json')
     writable = False
     err = None
@@ -620,7 +878,12 @@ def health_storage():
     except Exception as e:
         err = str(e)
     return jsonify({
-        'ok': writable,
+        'ok': writable and not db_configured(),
+        'storage': 'json-fallback' if writable else 'unavailable',
+        'database_configured': bool(DATABASE_URL),
+        'psycopg_available': psycopg is not None,
+        'tables_ready': db_ok,
+        'database_error': db_error,
         'data_dir': DATA_DIR,
         'vercel': bool(os.environ.get('VERCEL')),
         'writable': writable,
@@ -636,24 +899,38 @@ def signup():
     password = data.get('password', '')
     if not email or not password:
         return jsonify({'error': 'Email and password required'}), 400
+
+    if db_configured():
+        if db_get_user(email):
+            return jsonify({'error': 'Email already registered'}), 409
+        user = db_create_user(email, hash_password(password))
+        return jsonify({'message': 'Account created', 'user_id': user['id'], 'email': email, 'storage': 'neon'})
+
     users = load_json(USERS_FILE)
     if email in users:
         return jsonify({'error': 'Email already registered'}), 409
     user_id = str(uuid.uuid4())
     users[email] = {'id': user_id, 'email': email, 'password': hash_password(password), 'created': str(datetime.now())}
     save_json(USERS_FILE, users)
-    return jsonify({'message': 'Account created', 'user_id': user_id, 'email': email})
+    return jsonify({'message': 'Account created', 'user_id': user_id, 'email': email, 'storage': 'json-fallback'})
 
 @app.route('/api/login', methods=['POST'])
 def login():
     data = get_request_json()
     email = data.get('email', '').lower().strip()
     password = data.get('password', '')
+
+    if db_configured():
+        user = db_get_user(email)
+        if not user or user['password'] != hash_password(password):
+            return jsonify({'error': 'Invalid credentials'}), 401
+        return jsonify({'message': 'Login successful', 'user_id': user['id'], 'email': email, 'storage': 'neon'})
+
     users = load_json(USERS_FILE)
     user = users.get(email)
     if not user or user['password'] != hash_password(password):
         return jsonify({'error': 'Invalid credentials'}), 401
-    return jsonify({'message': 'Login successful', 'user_id': user['id'], 'email': email})
+    return jsonify({'message': 'Login successful', 'user_id': user['id'], 'email': email, 'storage': 'json-fallback'})
 
 @app.route('/api/change-password', methods=['POST'])
 def change_password():
@@ -661,20 +938,30 @@ def change_password():
     email = data.get('email', '').lower().strip()
     old_pwd = data.get('old_password', '')
     new_pwd = data.get('new_password', '')
+
+    if db_configured():
+        user = db_get_user(email)
+        if not user or user['password'] != hash_password(old_pwd):
+            return jsonify({'error': 'Invalid credentials'}), 401
+        db_update_password(email, hash_password(new_pwd))
+        return jsonify({'message': 'Password changed', 'storage': 'neon'})
+
     users = load_json(USERS_FILE)
     user = users.get(email)
     if not user or user['password'] != hash_password(old_pwd):
         return jsonify({'error': 'Invalid credentials'}), 401
     users[email]['password'] = hash_password(new_pwd)
     save_json(USERS_FILE, users)
-    return jsonify({'message': 'Password changed'})
+    return jsonify({'message': 'Password changed', 'storage': 'json-fallback'})
 
 # ─── PORTFOLIO ────────────────────────────────────────────────────────────────
 
 @app.route('/api/holdings/<user_id>', methods=['GET'])
 def get_holdings(user_id):
-    portfolios = load_json(PORTFOLIOS_FILE)
-    holdings = portfolios.get(user_id, [])
+    holdings = db_get_holdings(user_id) if db_configured() else None
+    if holdings is None:
+        portfolios = load_json(PORTFOLIOS_FILE)
+        holdings = portfolios.get(user_id, [])
     enriched = []
     for h in holdings:
         q = fetch_quote(h['symbol'])
@@ -697,9 +984,6 @@ def get_holdings(user_id):
 @app.route('/api/holdings/<user_id>', methods=['POST'])
 def add_holding(user_id):
     data = get_request_json()
-    portfolios = load_json(PORTFOLIOS_FILE)
-    if user_id not in portfolios:
-        portfolios[user_id] = []
     holding = {
         'id': str(uuid.uuid4()),
         'symbol': data['symbol'].upper(),
@@ -710,13 +994,25 @@ def add_holding(user_id):
         'industry': data.get('industry', data.get('sector', '')),
         'sector': ''
     }
-    portfolios[user_id].append(holding)
-    save_json(PORTFOLIOS_FILE, portfolios)
-    return jsonify({'message': 'Holding added', 'holding': holding})
+    if db_configured():
+        db_add_holding(user_id, holding)
+    else:
+        portfolios = load_json(PORTFOLIOS_FILE)
+        if user_id not in portfolios:
+            portfolios[user_id] = []
+        portfolios[user_id].append(holding)
+        save_json(PORTFOLIOS_FILE, portfolios)
+    return jsonify({'message': 'Holding added', 'holding': holding, 'storage': 'neon' if db_configured() else 'json-fallback'})
 
 @app.route('/api/holdings/<user_id>/<holding_id>', methods=['PUT'])
 def edit_holding(user_id, holding_id):
     data = get_request_json()
+    if db_configured():
+        updated = db_update_holding(user_id, holding_id, data.get('buy_price'), data.get('qty'), data.get('date'))
+        if updated:
+            return jsonify({'message': 'Updated', 'storage': 'neon'})
+        return jsonify({'error': 'Not found'}), 404
+
     portfolios = load_json(PORTFOLIOS_FILE)
     holdings = portfolios.get(user_id, [])
     for i, h in enumerate(holdings):
@@ -724,10 +1020,13 @@ def edit_holding(user_id, holding_id):
             holdings[i] = {**h, 'buy_price': float(data.get('buy_price', h['buy_price'])),
                            'qty': float(data.get('qty', h['qty'])), 'date': data.get('date', h['date'])}
             save_json(PORTFOLIOS_FILE, portfolios)
-            return jsonify({'message': 'Updated'})
+            return jsonify({'message': 'Updated', 'storage': 'json-fallback'})
     return jsonify({'error': 'Not found'}), 404
 
 def _delete_holding_record(user_id, holding_id):
+    if db_configured():
+        deleted = db_delete_holding(user_id, holding_id)
+        return int(deleted or 0)
     portfolios = load_json(PORTFOLIOS_FILE)
     holdings = portfolios.get(user_id, [])
     before = len(holdings)
@@ -750,9 +1049,13 @@ def delete_holding_post(user_id, holding_id):
 def sell_holding(user_id, holding_id):
     data = get_request_json()
     sell_price = float(data.get('sell_price', 0))
-    portfolios = load_json(PORTFOLIOS_FILE)
-    holdings = portfolios.get(user_id, [])
-    holding = next((h for h in holdings if h['id'] == holding_id), None)
+
+    if db_configured():
+        holding = db_get_holding(user_id, holding_id)
+    else:
+        portfolios = load_json(PORTFOLIOS_FILE)
+        holdings = portfolios.get(user_id, [])
+        holding = next((h for h in holdings if h['id'] == holding_id), None)
     if not holding:
         return jsonify({'error': 'Not found'}), 404
 
@@ -765,10 +1068,6 @@ def sell_holding(user_id, holding_id):
     if sell_qty > available_qty:
         return jsonify({'error': f'Sell quantity cannot exceed available quantity ({available_qty:g})'}), 400
 
-    # Record trade for the sold quantity only
-    trades = load_json(TRADES_FILE)
-    if user_id not in trades:
-        trades[user_id] = []
     invested_for_sold_qty = holding['buy_price'] * sell_qty
     pnl = (sell_price - holding['buy_price']) * sell_qty
     trade = {
@@ -783,27 +1082,38 @@ def sell_holding(user_id, holding_id):
         'pnl': round(pnl, 2),
         'pnl_pct': round((pnl / invested_for_sold_qty) * 100, 2) if invested_for_sold_qty else 0
     }
-    trades[user_id].append(trade)
-    save_json(TRADES_FILE, trades)
 
-    # Full sell removes the holding; partial sell reduces remaining quantity
-    if sell_qty == available_qty:
-        portfolios[user_id] = [h for h in holdings if h['id'] != holding_id]
+    remaining_qty = max(0, round(available_qty - sell_qty, 6))
+    if db_configured():
+        db_add_trade(user_id, trade)
+        db_set_holding_qty_or_delete(user_id, holding_id, remaining_qty)
     else:
-        for h in holdings:
-            if h['id'] == holding_id:
-                h['qty'] = round(available_qty - sell_qty, 6)
-                break
-        portfolios[user_id] = holdings
-    save_json(PORTFOLIOS_FILE, portfolios)
-    return jsonify({'message': 'Sold', 'trade': trade, 'remaining_qty': max(0, round(available_qty - sell_qty, 6))})
+        trades = load_json(TRADES_FILE)
+        if user_id not in trades:
+            trades[user_id] = []
+        trades[user_id].append(trade)
+        save_json(TRADES_FILE, trades)
+        portfolios = load_json(PORTFOLIOS_FILE)
+        holdings = portfolios.get(user_id, [])
+        if sell_qty == available_qty:
+            portfolios[user_id] = [h for h in holdings if h['id'] != holding_id]
+        else:
+            for h in holdings:
+                if h['id'] == holding_id:
+                    h['qty'] = remaining_qty
+                    break
+            portfolios[user_id] = holdings
+        save_json(PORTFOLIOS_FILE, portfolios)
+    return jsonify({'message': 'Sold', 'trade': trade, 'remaining_qty': remaining_qty, 'storage': 'neon' if db_configured() else 'json-fallback'})
 
 # ─── WATCHLIST ────────────────────────────────────────────────────────────────
 
 @app.route('/api/watchlist/<user_id>', methods=['GET'])
 def get_watchlist(user_id):
-    watchlists = load_json(WATCHLISTS_FILE)
-    items = watchlists.get(user_id, [])
+    items = db_get_watchlist(user_id) if db_configured() else None
+    if items is None:
+        watchlists = load_json(WATCHLISTS_FILE)
+        items = watchlists.get(user_id, [])
     enriched = []
     for item in items:
         q = fetch_quote(item['symbol'])
@@ -817,18 +1127,28 @@ def get_watchlist(user_id):
 @app.route('/api/watchlist/<user_id>', methods=['POST'])
 def add_watchlist(user_id):
     data = get_request_json()
+    symbol = data['symbol'].upper()
+    item = {'symbol': symbol, 'name': data.get('name', symbol),
+            'industry': data.get('industry', data.get('sector', '')), 'added': str(date.today())}
+    if db_configured():
+        inserted = db_add_watchlist(user_id, item)
+        if not inserted:
+            return jsonify({'error': 'Already in watchlist'}), 409
+        return jsonify({'message': 'Added to watchlist', 'storage': 'neon'})
+
     watchlists = load_json(WATCHLISTS_FILE)
     if user_id not in watchlists:
         watchlists[user_id] = []
-    symbol = data['symbol'].upper()
     if any(w['symbol'] == symbol for w in watchlists[user_id]):
         return jsonify({'error': 'Already in watchlist'}), 409
-    watchlists[user_id].append({'symbol': symbol, 'name': data.get('name', symbol),
-                                 'industry': data.get('industry', data.get('sector', '')), 'added': str(date.today())})
+    watchlists[user_id].append(item)
     save_json(WATCHLISTS_FILE, watchlists)
-    return jsonify({'message': 'Added to watchlist'})
+    return jsonify({'message': 'Added to watchlist', 'storage': 'json-fallback'})
 
 def _remove_watchlist_record(user_id, symbol):
+    if db_configured():
+        removed = db_delete_watchlist(user_id, symbol)
+        return int(removed or 0)
     watchlists = load_json(WATCHLISTS_FILE)
     target = _strip_exchange_suffix(symbol)
     current = watchlists.get(user_id, [])
@@ -852,8 +1172,11 @@ def remove_watchlist_post(user_id, symbol):
 
 @app.route('/api/trades/<user_id>', methods=['GET'])
 def get_trades(user_id):
-    trades = load_json(TRADES_FILE)
-    return jsonify(trades.get(user_id, []))
+    items = db_get_trades(user_id) if db_configured() else None
+    if items is None:
+        trades = load_json(TRADES_FILE)
+        items = trades.get(user_id, [])
+    return jsonify(items)
 
 # ─── MARKET DATA ──────────────────────────────────────────────────────────────
 
