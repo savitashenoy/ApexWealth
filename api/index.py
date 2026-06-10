@@ -104,96 +104,120 @@ def db_connect():
     return psycopg.connect(DATABASE_URL, autocommit=True, row_factory=dict_row, connect_timeout=10)
 
 def init_db():
-    """Create Neon tables once per cold start. Safe to run repeatedly."""
+    """Create / migrate Neon tables once per cold start. Safe to run repeatedly.
+
+    Important for Vercel/Neon upgrades:
+    older deployments had watchlist PRIMARY KEY (user_id, symbol) and no
+    group_name column. The migration must add group_name before any index or
+    query references group_name, otherwise Neon raises: column "group_name" does not exist.
+    """
     global DB_INIT_DONE, DB_LAST_ERROR
     if DB_INIT_DONE or not db_configured():
         return DB_INIT_DONE
-    schema = [
-        """
-        CREATE TABLE IF NOT EXISTS users (
-            id TEXT PRIMARY KEY,
-            email TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            created TIMESTAMPTZ DEFAULT NOW()
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS holdings (
-            id TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL,
-            symbol TEXT NOT NULL,
-            name TEXT,
-            buy_price DOUBLE PRECISION NOT NULL DEFAULT 0,
-            qty DOUBLE PRECISION NOT NULL DEFAULT 0,
-            date TEXT,
-            industry TEXT,
-            sector TEXT,
-            created_at TIMESTAMPTZ DEFAULT NOW()
-        )
-        """,
-        "CREATE INDEX IF NOT EXISTS idx_holdings_user ON holdings(user_id)",
-        """
-        CREATE TABLE IF NOT EXISTS watchlist (
-            user_id TEXT NOT NULL,
-            group_name TEXT NOT NULL DEFAULT 'Default',
-            symbol TEXT NOT NULL,
-            name TEXT,
-            industry TEXT,
-            added TEXT,
-            created_at TIMESTAMPTZ DEFAULT NOW(),
-            PRIMARY KEY (user_id, group_name, symbol)
-        )
-        """,
-        "CREATE INDEX IF NOT EXISTS idx_watchlist_user ON watchlist(user_id)",
-        "CREATE INDEX IF NOT EXISTS idx_watchlist_user_group ON watchlist(user_id, group_name)",
-        """
-        CREATE TABLE IF NOT EXISTS watchlist_groups (
-            user_id TEXT NOT NULL,
-            name TEXT NOT NULL,
-            created_at TIMESTAMPTZ DEFAULT NOW(),
-            PRIMARY KEY (user_id, name)
-        )
-        """,
-        "CREATE INDEX IF NOT EXISTS idx_watchlist_groups_user ON watchlist_groups(user_id)",
-        """
-        CREATE TABLE IF NOT EXISTS trades (
-            id TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL,
-            symbol TEXT NOT NULL,
-            name TEXT,
-            buy_price DOUBLE PRECISION NOT NULL DEFAULT 0,
-            sell_price DOUBLE PRECISION NOT NULL DEFAULT 0,
-            qty DOUBLE PRECISION NOT NULL DEFAULT 0,
-            buy_date TEXT,
-            sell_date TEXT,
-            pnl DOUBLE PRECISION NOT NULL DEFAULT 0,
-            pnl_pct DOUBLE PRECISION NOT NULL DEFAULT 0,
-            created_at TIMESTAMPTZ DEFAULT NOW()
-        )
-        """,
-        "CREATE INDEX IF NOT EXISTS idx_trades_user ON trades(user_id)"
-    ]
     try:
         with db_connect() as conn:
             with conn.cursor() as cur:
-                for stmt in schema:
-                    cur.execute(stmt)
-                # Migrate older Neon deployments from one watchlist per user to grouped watchlists.
-                cur.execute("ALTER TABLE watchlist ADD COLUMN IF NOT EXISTS group_name TEXT DEFAULT 'Default'")
-                cur.execute("UPDATE watchlist SET group_name='Default' WHERE group_name IS NULL OR group_name='' ")
+                # Core tables
                 cur.execute("""
-                    DO $$ BEGIN
-                        IF EXISTS (
-                            SELECT 1 FROM pg_constraint
-                            WHERE conname = 'watchlist_pkey'
-                              AND conrelid = 'watchlist'::regclass
-                        ) THEN
-                            ALTER TABLE watchlist DROP CONSTRAINT watchlist_pkey;
+                    CREATE TABLE IF NOT EXISTS users (
+                        id TEXT PRIMARY KEY,
+                        email TEXT UNIQUE NOT NULL,
+                        password TEXT NOT NULL,
+                        created TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS holdings (
+                        id TEXT PRIMARY KEY,
+                        user_id TEXT NOT NULL,
+                        symbol TEXT NOT NULL,
+                        name TEXT,
+                        buy_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+                        qty DOUBLE PRECISION NOT NULL DEFAULT 0,
+                        date TEXT,
+                        industry TEXT,
+                        sector TEXT,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_holdings_user ON holdings(user_id)")
+
+                # Watchlist table. If an older table already exists, this statement
+                # does not change it; the migration block below upgrades it safely.
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS watchlist (
+                        user_id TEXT NOT NULL,
+                        symbol TEXT NOT NULL,
+                        name TEXT,
+                        industry TEXT,
+                        added TEXT,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+
+                # Ensure grouped-watchlist columns exist BEFORE any index/query uses them.
+                cur.execute("ALTER TABLE watchlist ADD COLUMN IF NOT EXISTS group_name TEXT")
+                cur.execute("UPDATE watchlist SET group_name='Default' WHERE group_name IS NULL OR group_name='' ")
+                cur.execute("ALTER TABLE watchlist ALTER COLUMN group_name SET DEFAULT 'Default'")
+                cur.execute("ALTER TABLE watchlist ALTER COLUMN group_name SET NOT NULL")
+
+                # Remove duplicate rows before creating the grouped primary key.
+                cur.execute("""
+                    DELETE FROM watchlist a
+                    USING watchlist b
+                    WHERE a.ctid < b.ctid
+                      AND a.user_id = b.user_id
+                      AND a.group_name = b.group_name
+                      AND a.symbol = b.symbol
+                """)
+
+                # Drop any previous primary key, including the old (user_id, symbol) key.
+                cur.execute("""
+                    DO $$
+                    DECLARE pk_name text;
+                    BEGIN
+                        SELECT conname INTO pk_name
+                        FROM pg_constraint
+                        WHERE conrelid = 'watchlist'::regclass
+                          AND contype = 'p'
+                        LIMIT 1;
+                        IF pk_name IS NOT NULL THEN
+                            EXECUTE format('ALTER TABLE watchlist DROP CONSTRAINT %I', pk_name);
                         END IF;
                     END $$;
                 """)
                 cur.execute("ALTER TABLE watchlist ADD CONSTRAINT watchlist_pkey PRIMARY KEY (user_id, group_name, symbol)")
-                cur.execute("INSERT INTO watchlist_groups (user_id, name) SELECT DISTINCT user_id, 'Default' FROM watchlist ON CONFLICT DO NOTHING")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_user ON watchlist(user_id)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_user_group ON watchlist(user_id, group_name)")
+
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS watchlist_groups (
+                        user_id TEXT NOT NULL,
+                        name TEXT NOT NULL,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        PRIMARY KEY (user_id, name)
+                    )
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_groups_user ON watchlist_groups(user_id)")
+                cur.execute("INSERT INTO watchlist_groups (user_id, name) SELECT DISTINCT user_id, COALESCE(NULLIF(group_name,''),'Default') FROM watchlist ON CONFLICT DO NOTHING")
+
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS trades (
+                        id TEXT PRIMARY KEY,
+                        user_id TEXT NOT NULL,
+                        symbol TEXT NOT NULL,
+                        name TEXT,
+                        buy_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+                        sell_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+                        qty DOUBLE PRECISION NOT NULL DEFAULT 0,
+                        buy_date TEXT,
+                        sell_date TEXT,
+                        pnl DOUBLE PRECISION NOT NULL DEFAULT 0,
+                        pnl_pct DOUBLE PRECISION NOT NULL DEFAULT 0,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_trades_user ON trades(user_id)")
         DB_INIT_DONE = True
         DB_LAST_ERROR = None
         return True
