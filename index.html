@@ -2339,14 +2339,19 @@ async function importWatchlistFile(event) {
       else rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:''}).map(extractTickerFromRow);
     }
     const symbols = [...new Set(rows.map(normalizeImportedTicker).filter(Boolean))];
+    const group = getSelectedWatchlistGroup();
     let added = 0, skipped = 0;
     for (const symbol of symbols) {
       const meta = tickerMeta(symbol);
-      const r = await fetch(`${API}/watchlist/${encodeURIComponent(USER.user_id)}?group=${encodeURIComponent(group)}`, {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({symbol, name: meta.name || symbol, industry: meta.industry || meta.sector || '', group_name: group})
-      });
-      if (r.ok) added++; else skipped++;
+      try {
+        await fetchJsonSafe(`${API}/watchlist/${encodeURIComponent(USER.user_id)}?group=${encodeURIComponent(group)}`, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({symbol, name: meta.name || symbol, industry: meta.industry || meta.sector || '', group_name: group})
+        });
+        added++;
+      } catch(e) {
+        skipped++;
+      }
     }
     if (status) status.textContent = `Import complete for ${group}: ${added} added, ${skipped} skipped/already present.`;
     await loadWatchlist();

@@ -366,14 +366,32 @@ def db_add_watchlist(user_id, item, group_name='Default'):
             cur.execute('INSERT INTO watchlist (user_id, group_name, symbol, name, industry, added) VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT (user_id, group_name, symbol) DO NOTHING', (user_id, group_name, item['symbol'], item.get('name'), item.get('industry',''), item.get('added')))
             return cur.rowcount
 
-def db_delete_watchlist(user_id, symbol, group_name='Default'):
+def db_delete_watchlist(user_id, symbol, group_name='Default', purge_all=True):
+    """Delete a watchlist symbol permanently.
+
+    purge_all=True intentionally removes the normalized symbol from every
+    watchlist group for that user. This fixes stale legacy/duplicate rows that
+    can reappear after an optimistic UI delete or auto-refresh.
+    """
     if not init_db():
         return None
     target = _strip_exchange_suffix(symbol)
     group_name = normalize_watchlist_group(group_name)
     with db_connect() as conn:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM watchlist WHERE user_id=%s AND group_name=%s AND REPLACE(REPLACE(UPPER(symbol), '.NS', ''), '.BO', '')=%s", (user_id, group_name, target))
+            if purge_all:
+                cur.execute("""
+                    DELETE FROM watchlist
+                    WHERE user_id=%s
+                      AND REPLACE(REPLACE(UPPER(TRIM(symbol)), '.NS', ''), '.BO', '')=%s
+                """, (user_id, target))
+            else:
+                cur.execute("""
+                    DELETE FROM watchlist
+                    WHERE user_id=%s
+                      AND group_name=%s
+                      AND REPLACE(REPLACE(UPPER(TRIM(symbol)), '.NS', ''), '.BO', '')=%s
+                """, (user_id, group_name, target))
             return cur.rowcount
 
 def db_get_trades(user_id):
@@ -1337,23 +1355,27 @@ def add_watchlist(user_id):
 
 def _remove_watchlist_record(user_id, symbol, group_name='Default'):
     group_name = normalize_watchlist_group(group_name)
+    target = _strip_exchange_suffix(symbol)
     if db_configured():
-        removed = db_delete_watchlist(user_id, symbol, group_name)
+        # Purge across all groups so legacy duplicates cannot be restored
+        # by the next refresh. The selected group is still returned for UI context.
+        removed = db_delete_watchlist(user_id, target, group_name, purge_all=True)
         return int(removed or 0)
     watchlists = load_json(WATCHLISTS_FILE)
-    target = _strip_exchange_suffix(symbol)
     raw = watchlists.get(user_id, [])
+    removed = 0
     if isinstance(raw, dict):
-        current = raw.get(group_name, [])
-        before = len(current)
-        raw[group_name] = [w for w in current if _strip_exchange_suffix(w.get('symbol')) != target]
-        removed = before - len(raw[group_name])
+        for g, current in list(raw.items()):
+            current = current if isinstance(current, list) else []
+            before = len(current)
+            raw[g] = [w for w in current if _strip_exchange_suffix(w.get('symbol')) != target]
+            removed += before - len(raw[g])
         watchlists[user_id] = raw
     else:
-        current = raw
+        current = raw if isinstance(raw, list) else []
         before = len(current)
-        watchlists[user_id] = [w for w in current if _strip_exchange_suffix(w.get('symbol')) != target] if group_name == 'Default' else current
-        removed = before - len(watchlists[user_id]) if group_name == 'Default' else 0
+        watchlists[user_id] = [w for w in current if _strip_exchange_suffix(w.get('symbol')) != target]
+        removed = before - len(watchlists[user_id])
     save_json(WATCHLISTS_FILE, watchlists)
     return removed
 
