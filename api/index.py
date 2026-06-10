@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import json, os, hashlib, uuid, time
 from datetime import datetime, date
+from urllib.parse import urlparse
 import requests
 try:
     from curl_cffi import requests as crequests
@@ -41,21 +42,66 @@ TRADES_FILE = os.path.join(DATA_DIR, 'trades.json')
 # ─── PERSISTENT STORAGE: Neon PostgreSQL on Vercel ───────────────────────────
 # Set one of these env vars in Vercel from your Neon dashboard:
 # DATABASE_URL or POSTGRES_URL or NEON_DATABASE_URL
-DATABASE_URL = (
+RAW_DATABASE_URL = (
     os.environ.get('DATABASE_URL')
     or os.environ.get('POSTGRES_URL')
     or os.environ.get('NEON_DATABASE_URL')
-)
+    or ''
+).strip()
 DB_INIT_DONE = False
 DB_LAST_ERROR = None
 
+def _mask_database_url(url):
+    if not url:
+        return ''
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname or ''
+        dbname = (parsed.path or '').lstrip('/')
+        return f'{parsed.scheme}://***:***@{host}/{dbname}'
+    except Exception:
+        return '***masked***'
+
+def _validate_database_url(url):
+    if not url:
+        return None
+    lowered = url.lower()
+    parsed = urlparse(url)
+    host = parsed.hostname or ''
+    if not parsed.scheme.startswith('postgres'):
+        return 'DATABASE_URL must start with postgresql:// or postgres://.'
+    if not host:
+        return 'DATABASE_URL is missing the Neon host name.'
+    placeholder_tokens = ['host.neon.tech', 'user:', 'password@', 'dbname', '<', '>', 'your_', 'replace_']
+    if any(token in lowered for token in placeholder_tokens) or host.upper().startswith('HOST'):
+        return 'DATABASE_URL still contains placeholder text. Replace USER, PASSWORD, HOST and DBNAME with the exact Neon connection string.'
+    if 'neon.tech' not in host:
+        return f'DATABASE_URL host is {host}. For Neon it should usually end with .neon.tech or -pooler.*.neon.tech.'
+    if 'sslmode=' not in lowered:
+        return 'DATABASE_URL must include sslmode=require for Neon/Vercel.'
+    return None
+
+DATABASE_URL_ERROR = _validate_database_url(RAW_DATABASE_URL)
+DATABASE_URL = RAW_DATABASE_URL if not DATABASE_URL_ERROR else ''
+
 def db_configured():
-    return bool(DATABASE_URL and psycopg is not None)
+    return bool(DATABASE_URL and psycopg is not None and not DATABASE_URL_ERROR)
+
+def db_status_payload():
+    return {
+        'database_configured': bool(RAW_DATABASE_URL),
+        'database_url_valid': not bool(DATABASE_URL_ERROR) if RAW_DATABASE_URL else False,
+        'database_url_issue': DATABASE_URL_ERROR,
+        'database_url_masked': _mask_database_url(RAW_DATABASE_URL),
+        'psycopg_available': psycopg is not None,
+    }
 
 def db_connect():
+    if DATABASE_URL_ERROR:
+        raise RuntimeError(DATABASE_URL_ERROR)
     if not db_configured():
         raise RuntimeError('DATABASE_URL/POSTGRES_URL is not configured or psycopg is not installed')
-    return psycopg.connect(DATABASE_URL, autocommit=True, row_factory=dict_row)
+    return psycopg.connect(DATABASE_URL, autocommit=True, row_factory=dict_row, connect_timeout=10)
 
 def init_db():
     """Create Neon tables once per cold start. Safe to run repeatedly."""
@@ -304,6 +350,21 @@ def save_json(path, data):
 def get_request_json():
     data = request.get_json(silent=True)
     return data if isinstance(data, dict) else {}
+
+@app.before_request
+def validate_persistent_storage_config():
+    # On Vercel, a malformed DATABASE_URL should fail loudly as JSON instead of
+    # silently falling back to ephemeral /tmp JSON storage.
+    if not request.path.startswith('/api/') or request.path == '/api/health/storage':
+        return None
+    if os.environ.get('VERCEL') and RAW_DATABASE_URL and DATABASE_URL_ERROR:
+        return jsonify({
+            'error': 'Invalid Neon DATABASE_URL configuration',
+            'database_url_issue': DATABASE_URL_ERROR,
+            'database_url_masked': _mask_database_url(RAW_DATABASE_URL),
+            'fix': 'In Vercel Environment Variables, paste the exact Neon pooled connection string. Do not use HOST.neon.tech placeholder text. Redeploy after saving.'
+        }), 500
+    return None
 
 @app.errorhandler(404)
 def json_404(error):
@@ -861,7 +922,7 @@ def health_storage():
                 return jsonify({
                     'ok': True,
                     'storage': 'neon',
-                    'database_configured': True,
+                    **db_status_payload(),
                     'tables_ready': True,
                     'user_count': user_count,
                     'vercel': bool(os.environ.get('VERCEL'))
@@ -877,18 +938,21 @@ def health_storage():
         writable = True
     except Exception as e:
         err = str(e)
-    return jsonify({
-        'ok': writable and not db_configured(),
+    payload = {
+        'ok': False if RAW_DATABASE_URL else (writable and not db_configured()),
         'storage': 'json-fallback' if writable else 'unavailable',
-        'database_configured': bool(DATABASE_URL),
-        'psycopg_available': psycopg is not None,
+        **db_status_payload(),
         'tables_ready': db_ok,
-        'database_error': db_error,
+        'database_error': db_error or DATABASE_URL_ERROR,
         'data_dir': DATA_DIR,
         'vercel': bool(os.environ.get('VERCEL')),
         'writable': writable,
         'error': err
-    })
+    }
+    if DATABASE_URL_ERROR:
+        payload['fix'] = 'Replace the placeholder DATABASE_URL in Vercel with the exact Neon pooled connection string and redeploy.'
+        payload['example_shape'] = 'postgresql://USER:PASSWORD@ep-xxxxx-pooler.REGION.aws.neon.tech/DBNAME?sslmode=require'
+    return jsonify(payload)
 
 # ─── AUTH ─────────────────────────────────────────────────────────────────────
 
