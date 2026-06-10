@@ -2310,6 +2310,19 @@ function normalizeImportedTicker(v) {
   return String(v || '').trim().toUpperCase().replace(/^NSE:/,'').replace(/\.NS$|\.BO$/,'').replace(/[^A-Z0-9&-]/g, '');
 }
 
+function normalizeWatchlistSymbol(v) {
+  let s = String(v || '').trim();
+  try { s = decodeURIComponent(s); } catch(e) {}
+  const tmp = document.createElement('textarea');
+  tmp.innerHTML = s;
+  s = tmp.value;
+  return s.toUpperCase().replace(/\.NS$|\.BO$/,'');
+}
+
+function compactWatchlistSymbol(v) {
+  return normalizeWatchlistSymbol(v).replace(/[^A-Z0-9]/g, '');
+}
+
 function tickerMeta(symbol) {
   return TICKERS.find(t => String(t.symbol || '').toUpperCase() === symbol) || {symbol, name:symbol, industry:''};
 }
@@ -2509,20 +2522,32 @@ async function confirmWatchlistPortfolioAdd() {
 async function removeFromWatchlist(symbol, ev) {
   if (ev) { ev.preventDefault(); ev.stopPropagation(); }
   const btn = ev?.currentTarget;
-  const cleanSymbol = decodeURIComponent(symbol || '');
+  const cleanSymbol = normalizeWatchlistSymbol(symbol || '');
+  const compactSymbol = compactWatchlistSymbol(cleanSymbol);
   const group = getSelectedWatchlistGroup();
   if (!USER || !cleanSymbol) return;
   const previous = [...currentWatchlistItems];
-  currentWatchlistItems = currentWatchlistItems.filter(item => String(item.symbol || '').toUpperCase() !== cleanSymbol.toUpperCase());
+  currentWatchlistItems = currentWatchlistItems.filter(item => compactWatchlistSymbol(item.symbol) !== compactSymbol);
   renderWatchlistItems(currentWatchlistItems);
   if (btn) btn.disabled = true;
   try {
-    await fetchJsonSafe(`${API}/watchlist/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(cleanSymbol)}?group=${encodeURIComponent(group)}`, {method:'DELETE', cache:'no-store'});
+    // Prefer JSON body delete so special NSE symbols such as J&KBANK are not affected by URL/path decoding.
+    const resp = await fetchJsonSafe(`${API}/watchlist-delete/${encodeURIComponent(USER.user_id)}`, {
+      method:'POST', cache:'no-store', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({symbol: cleanSymbol, group_name: group})
+    });
+    if (!resp || Number(resp.removed || 0) <= 0) {
+      // Fallback to legacy path routes for older deployments/routes.
+      await fetchJsonSafe(`${API}/watchlist/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(cleanSymbol)}?group=${encodeURIComponent(group)}`, {method:'DELETE', cache:'no-store'});
+    }
     setLastUpdated(`Watchlist item removed · ${group}`);
+    // Confirm from Neon after purge so stale duplicates cannot be visually restored.
+    await loadWatchlist(false);
   } catch(err) {
     try {
       await fetchJsonSafe(`${API}/watchlist/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(cleanSymbol)}/delete?group=${encodeURIComponent(group)}`, {method:'POST', cache:'no-store'});
       setLastUpdated(`Watchlist item removed · ${group}`);
+      await loadWatchlist(false);
     } catch(err2) {
       currentWatchlistItems = previous;
       renderWatchlistItems(currentWatchlistItems);

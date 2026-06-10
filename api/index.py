@@ -2,7 +2,8 @@ from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import json, os, hashlib, uuid, time
 from datetime import datetime, date
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
+import html as html_lib
 import requests
 try:
     from curl_cffi import requests as crequests
@@ -369,29 +370,36 @@ def db_add_watchlist(user_id, item, group_name='Default'):
 def db_delete_watchlist(user_id, symbol, group_name='Default', purge_all=True):
     """Delete a watchlist symbol permanently.
 
-    purge_all=True intentionally removes the normalized symbol from every
-    watchlist group for that user. This fixes stale legacy/duplicate rows that
-    can reappear after an optimistic UI delete or auto-refresh.
+    Uses both strict and compact symbol matching so special NSE symbols like
+    J&KBANK are removed even if old rows were stored as J%26KBANK, J&amp;KBANK,
+    J&KBANK.NS, or JKBANK during earlier migrations/imports.
     """
     if not init_db():
         return None
     target = _strip_exchange_suffix(symbol)
+    target_compact = _compact_symbol_key(target)
     group_name = normalize_watchlist_group(group_name)
+    sql_norm = """
+        REPLACE(REPLACE(REPLACE(REPLACE(UPPER(TRIM(symbol)), '&AMP;', '&'), '%26', '&'), '.NS', ''), '.BO', '')
+    """
+    sql_compact = """
+        REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(UPPER(TRIM(symbol)), '&AMP;', '&'), '%26', '&'), '.NS', ''), '.BO', ''), '[^A-Z0-9]', '', 'g')
+    """
     with db_connect() as conn:
         with conn.cursor() as cur:
             if purge_all:
-                cur.execute("""
+                cur.execute(f"""
                     DELETE FROM watchlist
                     WHERE user_id=%s
-                      AND REPLACE(REPLACE(UPPER(TRIM(symbol)), '.NS', ''), '.BO', '')=%s
-                """, (user_id, target))
+                      AND (({sql_norm})=%s OR ({sql_compact})=%s)
+                """, (user_id, target, target_compact))
             else:
-                cur.execute("""
+                cur.execute(f"""
                     DELETE FROM watchlist
                     WHERE user_id=%s
                       AND group_name=%s
-                      AND REPLACE(REPLACE(UPPER(TRIM(symbol)), '.NS', ''), '.BO', '')=%s
-                """, (user_id, group_name, target))
+                      AND (({sql_norm})=%s OR ({sql_compact})=%s)
+                """, (user_id, group_name, target, target_compact))
             return cur.rowcount
 
 def db_get_trades(user_id):
@@ -489,7 +497,24 @@ def get_nse_ticker(symbol):
     return f"{symbol}.NS"
 
 def _strip_exchange_suffix(symbol):
-    return str(symbol or '').upper().strip().replace('.NS', '').replace('.BO', '')
+    """Normalize ticker strings used by URLs, HTML attributes and Yahoo suffixes.
+
+    Important for NSE symbols such as J&KBANK: depending on the browser/proxy,
+    the backend may receive J&KBANK, J%26KBANK, J&amp;KBANK, or J&KBANK.NS.
+    All of them should resolve to the same app symbol before delete/purge.
+    """
+    try:
+        sym = unquote(str(symbol or ''))
+    except Exception:
+        sym = str(symbol or '')
+    sym = html_lib.unescape(sym).upper().strip()
+    return sym.replace('.NS', '').replace('.BO', '')
+
+
+def _compact_symbol_key(symbol):
+    """Comparison key used to purge legacy/encoded duplicate watchlist rows."""
+    base = _strip_exchange_suffix(symbol)
+    return ''.join(ch for ch in base if ch.isalnum())
 
 
 def _clean_symbol(symbol):
@@ -1365,16 +1390,18 @@ def _remove_watchlist_record(user_id, symbol, group_name='Default'):
     raw = watchlists.get(user_id, [])
     removed = 0
     if isinstance(raw, dict):
+        target_compact = _compact_symbol_key(target)
         for g, current in list(raw.items()):
             current = current if isinstance(current, list) else []
             before = len(current)
-            raw[g] = [w for w in current if _strip_exchange_suffix(w.get('symbol')) != target]
+            raw[g] = [w for w in current if _strip_exchange_suffix(w.get('symbol')) != target and _compact_symbol_key(w.get('symbol')) != target_compact]
             removed += before - len(raw[g])
         watchlists[user_id] = raw
     else:
         current = raw if isinstance(raw, list) else []
         before = len(current)
-        watchlists[user_id] = [w for w in current if _strip_exchange_suffix(w.get('symbol')) != target]
+        target_compact = _compact_symbol_key(target)
+        watchlists[user_id] = [w for w in current if _strip_exchange_suffix(w.get('symbol')) != target and _compact_symbol_key(w.get('symbol')) != target_compact]
         removed = before - len(watchlists[user_id])
     save_json(WATCHLISTS_FILE, watchlists)
     return removed
@@ -1390,6 +1417,17 @@ def remove_watchlist_post(user_id, symbol):
     group_name = _watchlist_group_from_request()
     removed = _remove_watchlist_record(user_id, symbol, group_name)
     return jsonify({'message': 'Removed', 'removed': removed, 'group': group_name})
+
+@app.route('/api/watchlist-delete/<user_id>', methods=['POST'])
+def remove_watchlist_json(user_id):
+    # JSON-body delete avoids special-character path issues for symbols like J&KBANK.
+    data = get_request_json()
+    symbol = data.get('symbol') or data.get('ticker')
+    group_name = normalize_watchlist_group(data.get('group') or data.get('group_name') or request.args.get('group') or 'Default')
+    if not symbol:
+        return jsonify({'error': 'symbol is required'}), 400
+    removed = _remove_watchlist_record(user_id, symbol, group_name)
+    return jsonify({'message': 'Removed', 'removed': removed, 'group': group_name, 'symbol': _strip_exchange_suffix(symbol)})
 
 # ─── TRADES HISTORY ───────────────────────────────────────────────────────────
 
