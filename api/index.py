@@ -380,10 +380,10 @@ def db_delete_watchlist(user_id, symbol, group_name='Default', purge_all=True):
     target_compact = _compact_symbol_key(target)
     group_name = normalize_watchlist_group(group_name)
     sql_norm = """
-        REPLACE(REPLACE(REPLACE(REPLACE(UPPER(TRIM(symbol)), '&AMP;', '&'), '%26', '&'), '.NS', ''), '.BO', '')
+        REPLACE(REPLACE(REPLACE(REPLACE(UPPER(TRIM(symbol)), '&AMP;', '&'), '%%26', '&'), '.NS', ''), '.BO', '')
     """
     sql_compact = """
-        REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(UPPER(TRIM(symbol)), '&AMP;', '&'), '%26', '&'), '.NS', ''), '.BO', ''), '[^A-Z0-9]', '', 'g')
+        REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(UPPER(TRIM(symbol)), '&AMP;', '&'), '%%26', '&'), '.NS', ''), '.BO', ''), '[^A-Z0-9]', '', 'g')
     """
     with db_connect() as conn:
         with conn.cursor() as cur:
