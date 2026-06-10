@@ -135,15 +135,26 @@ def init_db():
         """
         CREATE TABLE IF NOT EXISTS watchlist (
             user_id TEXT NOT NULL,
+            group_name TEXT NOT NULL DEFAULT 'Default',
             symbol TEXT NOT NULL,
             name TEXT,
             industry TEXT,
             added TEXT,
             created_at TIMESTAMPTZ DEFAULT NOW(),
-            PRIMARY KEY (user_id, symbol)
+            PRIMARY KEY (user_id, group_name, symbol)
         )
         """,
         "CREATE INDEX IF NOT EXISTS idx_watchlist_user ON watchlist(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_watchlist_user_group ON watchlist(user_id, group_name)",
+        """
+        CREATE TABLE IF NOT EXISTS watchlist_groups (
+            user_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            PRIMARY KEY (user_id, name)
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_watchlist_groups_user ON watchlist_groups(user_id)",
         """
         CREATE TABLE IF NOT EXISTS trades (
             id TEXT PRIMARY KEY,
@@ -167,6 +178,22 @@ def init_db():
             with conn.cursor() as cur:
                 for stmt in schema:
                     cur.execute(stmt)
+                # Migrate older Neon deployments from one watchlist per user to grouped watchlists.
+                cur.execute("ALTER TABLE watchlist ADD COLUMN IF NOT EXISTS group_name TEXT DEFAULT 'Default'")
+                cur.execute("UPDATE watchlist SET group_name='Default' WHERE group_name IS NULL OR group_name='' ")
+                cur.execute("""
+                    DO $$ BEGIN
+                        IF EXISTS (
+                            SELECT 1 FROM pg_constraint
+                            WHERE conname = 'watchlist_pkey'
+                              AND conrelid = 'watchlist'::regclass
+                        ) THEN
+                            ALTER TABLE watchlist DROP CONSTRAINT watchlist_pkey;
+                        END IF;
+                    END $$;
+                """)
+                cur.execute("ALTER TABLE watchlist ADD CONSTRAINT watchlist_pkey PRIMARY KEY (user_id, group_name, symbol)")
+                cur.execute("INSERT INTO watchlist_groups (user_id, name) SELECT DISTINCT user_id, 'Default' FROM watchlist ON CONFLICT DO NOTHING")
         DB_INIT_DONE = True
         DB_LAST_ERROR = None
         return True
@@ -270,30 +297,59 @@ def db_set_holding_qty_or_delete(user_id, holding_id, new_qty):
             cur.execute('UPDATE holdings SET qty=%s WHERE user_id=%s AND id=%s', (float(new_qty), user_id, holding_id))
             return cur.rowcount
 
-def db_get_watchlist(user_id):
+def normalize_watchlist_group(name):
+    cleaned = str(name or '').strip()
+    return cleaned[:60] if cleaned else 'Default'
+
+def db_get_watchlist_groups(user_id):
     if not init_db():
         return None
     with db_connect() as conn:
         with conn.cursor() as cur:
-            cur.execute('SELECT symbol, name, industry, added FROM watchlist WHERE user_id=%s ORDER BY created_at, symbol', (user_id,))
+            cur.execute("INSERT INTO watchlist_groups (user_id, name) VALUES (%s, 'Default') ON CONFLICT DO NOTHING", (user_id,))
+            cur.execute('SELECT name FROM watchlist_groups WHERE user_id=%s ORDER BY CASE WHEN name=%s THEN 0 ELSE 1 END, created_at, name', (user_id, 'Default'))
             rows = cur.fetchall() or []
-    return [_row_to_dict(r) for r in rows]
+    groups = [r.get('name') for r in rows if r.get('name')]
+    return groups or ['Default']
 
-def db_add_watchlist(user_id, item):
+def db_add_watchlist_group(user_id, name):
+    group_name = normalize_watchlist_group(name)
     if not init_db():
         raise RuntimeError(DB_LAST_ERROR or 'Database is not initialized')
     with db_connect() as conn:
         with conn.cursor() as cur:
-            cur.execute('INSERT INTO watchlist (user_id, symbol, name, industry, added) VALUES (%s,%s,%s,%s,%s) ON CONFLICT (user_id, symbol) DO NOTHING', (user_id, item['symbol'], item.get('name'), item.get('industry',''), item.get('added')))
+            cur.execute('INSERT INTO watchlist_groups (user_id, name) VALUES (%s,%s) ON CONFLICT DO NOTHING', (user_id, group_name))
+            return group_name
+
+def db_get_watchlist(user_id, group_name='Default'):
+    if not init_db():
+        return None
+    group_name = normalize_watchlist_group(group_name)
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO watchlist_groups (user_id, name) VALUES (%s, %s) ON CONFLICT DO NOTHING", (user_id, group_name))
+            cur.execute('SELECT group_name, symbol, name, industry, added FROM watchlist WHERE user_id=%s AND group_name=%s ORDER BY created_at, symbol', (user_id, group_name))
+            rows = cur.fetchall() or []
+    return [_row_to_dict(r) for r in rows]
+
+def db_add_watchlist(user_id, item, group_name='Default'):
+    if not init_db():
+        raise RuntimeError(DB_LAST_ERROR or 'Database is not initialized')
+    group_name = normalize_watchlist_group(group_name)
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute('INSERT INTO watchlist_groups (user_id, name) VALUES (%s,%s) ON CONFLICT DO NOTHING', (user_id, group_name))
+            cur.execute('INSERT INTO watchlist (user_id, group_name, symbol, name, industry, added) VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT (user_id, group_name, symbol) DO NOTHING', (user_id, group_name, item['symbol'], item.get('name'), item.get('industry',''), item.get('added')))
             return cur.rowcount
 
-def db_delete_watchlist(user_id, symbol):
+def db_delete_watchlist(user_id, symbol, group_name='Default'):
     if not init_db():
         return None
     target = _strip_exchange_suffix(symbol)
+    group_name = normalize_watchlist_group(group_name)
     with db_connect() as conn:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM watchlist WHERE user_id=%s AND REPLACE(REPLACE(UPPER(symbol), '.NS', ''), '.BO', '')=%s", (user_id, target))
+            cur.execute("DELETE FROM watchlist WHERE user_id=%s AND group_name=%s AND REPLACE(REPLACE(UPPER(symbol), '.NS', ''), '.BO', '')=%s", (user_id, group_name, target))
             return cur.rowcount
 
 def db_get_trades(user_id):
@@ -1172,65 +1228,122 @@ def sell_holding(user_id, holding_id):
 
 # ─── WATCHLIST ────────────────────────────────────────────────────────────────
 
+def _watchlist_group_from_request():
+    data = get_request_json() if request.method in ('POST', 'PUT', 'PATCH') else {}
+    return normalize_watchlist_group(request.args.get('group') or data.get('group_name') or data.get('group') or 'Default')
+
+def _json_watchlist_groups_blob(watchlists, user_id):
+    raw = watchlists.get(user_id, [])
+    if isinstance(raw, dict):
+        groups = list(raw.keys()) or ['Default']
+    else:
+        groups = ['Default']
+    return groups
+
+@app.route('/api/watchlist-groups/<user_id>', methods=['GET'])
+def get_watchlist_groups(user_id):
+    groups = db_get_watchlist_groups(user_id) if db_configured() else None
+    if groups is None:
+        watchlists = load_json(WATCHLISTS_FILE)
+        groups = _json_watchlist_groups_blob(watchlists, user_id)
+    return jsonify({'groups': groups or ['Default']})
+
+@app.route('/api/watchlist-groups/<user_id>', methods=['POST'])
+def add_watchlist_group(user_id):
+    data = get_request_json()
+    group_name = normalize_watchlist_group(data.get('name') or data.get('group_name') or data.get('group'))
+    if db_configured():
+        group_name = db_add_watchlist_group(user_id, group_name)
+        return jsonify({'message': 'Group ready', 'group': group_name, 'storage': 'neon'})
+    watchlists = load_json(WATCHLISTS_FILE)
+    raw = watchlists.get(user_id, [])
+    if not isinstance(raw, dict):
+        raw = {'Default': raw if isinstance(raw, list) else []}
+    raw.setdefault(group_name, [])
+    watchlists[user_id] = raw
+    save_json(WATCHLISTS_FILE, watchlists)
+    return jsonify({'message': 'Group ready', 'group': group_name, 'storage': 'json-fallback'})
+
 @app.route('/api/watchlist/<user_id>', methods=['GET'])
 def get_watchlist(user_id):
-    items = db_get_watchlist(user_id) if db_configured() else None
+    group_name = _watchlist_group_from_request()
+    items = db_get_watchlist(user_id, group_name) if db_configured() else None
     if items is None:
         watchlists = load_json(WATCHLISTS_FILE)
-        items = watchlists.get(user_id, [])
+        raw = watchlists.get(user_id, [])
+        if isinstance(raw, dict):
+            items = raw.get(group_name, [])
+        else:
+            items = raw if group_name == 'Default' else []
     enriched = []
     for item in items:
         q = fetch_quote(item['symbol'])
         returns = fetch_return_profile(item['symbol'], q)
+        base = {**item, 'group_name': item.get('group_name', group_name)}
         if q:
-            enriched.append({**item, **q, **returns})
+            enriched.append({**base, **q, **returns})
         else:
-            enriched.append({**item, **returns})
+            enriched.append({**base, **returns})
     return jsonify(enriched)
 
 @app.route('/api/watchlist/<user_id>', methods=['POST'])
 def add_watchlist(user_id):
     data = get_request_json()
+    group_name = normalize_watchlist_group(request.args.get('group') or data.get('group_name') or data.get('group') or 'Default')
     symbol = data['symbol'].upper()
     item = {'symbol': symbol, 'name': data.get('name', symbol),
-            'industry': data.get('industry', data.get('sector', '')), 'added': str(date.today())}
+            'industry': data.get('industry', data.get('sector', '')), 'added': str(date.today()), 'group_name': group_name}
     if db_configured():
-        inserted = db_add_watchlist(user_id, item)
+        inserted = db_add_watchlist(user_id, item, group_name)
         if not inserted:
-            return jsonify({'error': 'Already in watchlist'}), 409
-        return jsonify({'message': 'Added to watchlist', 'storage': 'neon'})
+            return jsonify({'error': 'Already in selected watchlist group'}), 409
+        return jsonify({'message': 'Added to watchlist', 'group': group_name, 'storage': 'neon'})
 
     watchlists = load_json(WATCHLISTS_FILE)
-    if user_id not in watchlists:
-        watchlists[user_id] = []
-    if any(w['symbol'] == symbol for w in watchlists[user_id]):
-        return jsonify({'error': 'Already in watchlist'}), 409
-    watchlists[user_id].append(item)
+    raw = watchlists.get(user_id, [])
+    if not isinstance(raw, dict):
+        raw = {'Default': raw if isinstance(raw, list) else []}
+    raw.setdefault(group_name, [])
+    if any(w['symbol'] == symbol for w in raw[group_name]):
+        return jsonify({'error': 'Already in selected watchlist group'}), 409
+    raw[group_name].append(item)
+    watchlists[user_id] = raw
     save_json(WATCHLISTS_FILE, watchlists)
-    return jsonify({'message': 'Added to watchlist', 'storage': 'json-fallback'})
+    return jsonify({'message': 'Added to watchlist', 'group': group_name, 'storage': 'json-fallback'})
 
-def _remove_watchlist_record(user_id, symbol):
+def _remove_watchlist_record(user_id, symbol, group_name='Default'):
+    group_name = normalize_watchlist_group(group_name)
     if db_configured():
-        removed = db_delete_watchlist(user_id, symbol)
+        removed = db_delete_watchlist(user_id, symbol, group_name)
         return int(removed or 0)
     watchlists = load_json(WATCHLISTS_FILE)
     target = _strip_exchange_suffix(symbol)
-    current = watchlists.get(user_id, [])
-    before = len(current)
-    watchlists[user_id] = [w for w in current if _strip_exchange_suffix(w.get('symbol')) != target]
-    removed = before - len(watchlists[user_id])
+    raw = watchlists.get(user_id, [])
+    if isinstance(raw, dict):
+        current = raw.get(group_name, [])
+        before = len(current)
+        raw[group_name] = [w for w in current if _strip_exchange_suffix(w.get('symbol')) != target]
+        removed = before - len(raw[group_name])
+        watchlists[user_id] = raw
+    else:
+        current = raw
+        before = len(current)
+        watchlists[user_id] = [w for w in current if _strip_exchange_suffix(w.get('symbol')) != target] if group_name == 'Default' else current
+        removed = before - len(watchlists[user_id]) if group_name == 'Default' else 0
     save_json(WATCHLISTS_FILE, watchlists)
     return removed
 
 @app.route('/api/watchlist/<user_id>/<path:symbol>', methods=['DELETE'])
 def remove_watchlist(user_id, symbol):
-    removed = _remove_watchlist_record(user_id, symbol)
-    return jsonify({'message': 'Removed', 'removed': removed})
+    group_name = _watchlist_group_from_request()
+    removed = _remove_watchlist_record(user_id, symbol, group_name)
+    return jsonify({'message': 'Removed', 'removed': removed, 'group': group_name})
 
 @app.route('/api/watchlist/<user_id>/<path:symbol>/delete', methods=['POST'])
 def remove_watchlist_post(user_id, symbol):
-    removed = _remove_watchlist_record(user_id, symbol)
-    return jsonify({'message': 'Removed', 'removed': removed})
+    group_name = _watchlist_group_from_request()
+    removed = _remove_watchlist_record(user_id, symbol, group_name)
+    return jsonify({'message': 'Removed', 'removed': removed, 'group': group_name})
 
 # ─── TRADES HISTORY ───────────────────────────────────────────────────────────
 

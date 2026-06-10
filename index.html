@@ -628,6 +628,10 @@ body.light .score-detail-table thead th { background: #e4e0d6; }
 .modal-btns .btn { flex: 1; }
 
 /* ── WATCHLIST ── */
+.watchlist-group-row { display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; margin-bottom:14px; padding:12px; border:1px solid var(--border); border-radius:14px; background:var(--card); }
+.watchlist-group-row .form-group { min-width:180px; }
+.watchlist-group-row .form-group.group-select { flex:0 0 240px; }
+.watchlist-group-row .form-group.group-create { flex:1; min-width:260px; }
 .watchlist-add-row { display: flex; gap: 12px; margin-bottom: 16px; align-items: flex-end; }
 .watchlist-add-row .autocomplete-wrap { flex: 1; }
 .watchlist-add-row .form-group { flex: 1; }
@@ -1189,26 +1193,39 @@ body.dark .watchlist-heatmap-table .hm-name { color: var(--text-secondary); }
     <!-- WATCHLIST PAGE -->
     <div class="page" id="page-watchlist">
       <div class="page-title"><i class="fa fa-star"></i> Watchlist</div>
+      <div class="watchlist-group-row">
+        <div class="form-group group-select">
+          <div class="form-label">Watchlist Group</div>
+          <select class="form-input" id="watchlist-group-select" onchange="switchWatchlistGroup()">
+            <option value="Default">Default</option>
+          </select>
+        </div>
+        <div class="form-group group-create">
+          <div class="form-label">Create New Watchlist Group</div>
+          <input class="form-input" type="text" id="watchlist-group-name" placeholder="Example: Swing Trades, Long Term, PLI Stocks" />
+        </div>
+        <button class="btn btn-outline" onclick="createWatchlistGroup()" style="padding:12px 16px"><i class="fa fa-folder-plus"></i> Create Group</button>
+      </div>
       <div class="watchlist-add-row">
         <div class="form-group" style="flex:1">
-          <div class="form-label">Add to Watchlist</div>
+          <div class="form-label">Add to Selected Watchlist Group</div>
           <div class="autocomplete-wrap">
             <input class="form-input" type="text" id="wl-ticker" placeholder="Search symbol or name…" autocomplete="off" oninput="wlTickerSearch(this.value)"/>
             <div class="autocomplete-list" id="wl-ac-list" style="display:none"></div>
           </div>
         </div>
         <button class="btn btn-primary" onclick="addToWatchlist()" style="padding:12px 20px"><i class="fa fa-plus"></i> Add</button>
-        <button class="btn btn-outline" onclick="document.getElementById('watchlist-import-file').click()" style="padding:12px 16px"><i class="fa fa-file-import"></i> Import CSV/XLSX</button>
+        <button class="btn btn-outline" onclick="document.getElementById('watchlist-import-file').click()" style="padding:12px 16px"><i class="fa fa-file-import"></i> Import to Group</button>
         <input class="import-file-input" type="file" id="watchlist-import-file" accept=".csv,.xlsx,.xls" onchange="importWatchlistFile(event)"/>
       </div>
-      <div class="import-hint" id="watchlist-import-status">Import supports columns named Symbol/Ticker or the first column as ticker.</div>
+      <div class="import-hint" id="watchlist-import-status">Import adds tickers to the selected group. Supports columns named Symbol/Ticker or the first column as ticker.</div>
       <div class="table-wrap">
         <table>
           <thead>
-            <tr><th>Symbol</th><th>Name</th><th>Industry</th><th>LTP (₹)</th><th>DayHigh</th><th>DayLow</th><th>Volume</th><th>Day Chg %</th><th>Added</th><th>Action</th></tr>
+            <tr><th>Symbol</th><th>Name</th><th>LTP (₹)</th><th>DayHigh</th><th>DayLow</th><th>Volume</th><th>Day Chg %</th><th>Action</th></tr>
           </thead>
           <tbody id="watchlist-tbody">
-            <tr><td colspan="10"><div class="loading-overlay"><div class="spinner"></div> Loading…</div></td></tr>
+            <tr><td colspan="8"><div class="loading-overlay"><div class="spinner"></div> Loading…</div></td></tr>
           </tbody>
         </table>
       </div>
@@ -1462,6 +1479,9 @@ let marketIndexChart, marketIndicesData = [], selectedMarketIndex = 'nifty50', s
 let activeAnalysisTab = 'technicals';
 let perfCumulativeChart;
 let watchlistPortfolioItem = null;
+let watchlistGroups = ['Default'];
+let activeWatchlistGroup = 'Default';
+let currentWatchlistItems = [];
 let marketAutoRefreshTimer = null;
 let activeRefreshUserId = null;
 let lastUpdateSource = '';
@@ -1555,7 +1575,7 @@ function clearAppState() {
   Object.entries(ids).forEach(([id,val]) => { const el=document.getElementById(id); if(el) el.textContent=val; });
   const tableClears = {
     'holdings-tbody':'<tr><td colspan="11"><div class="empty-state"><i class="fa fa-briefcase"></i><p>No holdings yet. Add your first position above.</p></div></td></tr>',
-    'watchlist-tbody':'<tr><td colspan="10"><div class="empty-state"><i class="fa fa-star"></i><p>Your watchlist is empty.</p></div></td></tr>',
+    'watchlist-tbody':'<tr><td colspan="8"><div class="empty-state"><i class="fa fa-star"></i><p>Your watchlist is empty.</p></div></td></tr>',
     'watchlist-heatmap-tbody':'<tr><td colspan="6"><div class="empty-state"><i class="fa fa-fire"></i><p>No watchlist data for heat map.</p></div></td></tr>',
     'trades-tbody':'<tr><td colspan="8"><div class="empty-state"><i class="fa fa-history"></i><p>No completed trades yet</p></div></td></tr>'
   };
@@ -1591,7 +1611,7 @@ function startMarketAutoRefresh() {
         // warm the data without changing the current screen
         await Promise.allSettled([
           fetch(`${API}/holdings/${USER.user_id}`, {cache:'no-store'}),
-          fetch(`${API}/watchlist/${USER.user_id}`, {cache:'no-store'})
+          fetch(`${API}/watchlist/${encodeURIComponent(USER.user_id)}?group=${encodeURIComponent(getSelectedWatchlistGroup())}`, {cache:'no-store'})
         ]);
       }
     } catch(e) {}
@@ -2181,16 +2201,74 @@ function selectWLTicker(symbol, name, industry) {
 
 function closeWLAC()      { document.getElementById('wl-ac-list').style.display = 'none'; }
 
+function getSelectedWatchlistGroup() {
+  const sel = document.getElementById('watchlist-group-select');
+  return (sel && sel.value ? sel.value : activeWatchlistGroup || 'Default').trim() || 'Default';
+}
+
+function renderWatchlistGroupOptions() {
+  const sel = document.getElementById('watchlist-group-select');
+  if (!sel) return;
+  const groups = [...new Set((watchlistGroups || ['Default']).filter(Boolean))];
+  if (!groups.includes('Default')) groups.unshift('Default');
+  const previous = activeWatchlistGroup || sel.value || 'Default';
+  sel.innerHTML = groups.map(g => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join('');
+  activeWatchlistGroup = groups.includes(previous) ? previous : groups[0];
+  sel.value = activeWatchlistGroup;
+}
+
+async function loadWatchlistGroups() {
+  if (!USER) return;
+  try {
+    const d = await fetchJsonSafe(`${API}/watchlist-groups/${encodeURIComponent(USER.user_id)}`, {cache:'no-store'});
+    watchlistGroups = d.groups && d.groups.length ? d.groups : ['Default'];
+  } catch(e) {
+    watchlistGroups = watchlistGroups && watchlistGroups.length ? watchlistGroups : ['Default'];
+  }
+  renderWatchlistGroupOptions();
+}
+
+async function createWatchlistGroup() {
+  const input = document.getElementById('watchlist-group-name');
+  const status = document.getElementById('watchlist-import-status');
+  const name = (input?.value || '').trim();
+  if (!name) { if (status) status.textContent = 'Enter a watchlist group name.'; return; }
+  try {
+    const d = await fetchJsonSafe(`${API}/watchlist-groups/${encodeURIComponent(USER.user_id)}`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({name})
+    });
+    activeWatchlistGroup = d.group || name;
+    if (input) input.value = '';
+    await loadWatchlistGroups();
+    const sel = document.getElementById('watchlist-group-select');
+    if (sel) sel.value = activeWatchlistGroup;
+    if (status) status.textContent = `Watchlist group ready: ${activeWatchlistGroup}`;
+    await loadWatchlist(false);
+  } catch(err) {
+    if (status) status.textContent = `Could not create group: ${err.message}`;
+  }
+}
+
+async function switchWatchlistGroup() {
+  activeWatchlistGroup = getSelectedWatchlistGroup();
+  selectedWLTicker = null;
+  const input = document.getElementById('wl-ticker');
+  if (input) input.value = '';
+  await loadWatchlist(false);
+}
+
 async function addToWatchlist() {
   if (!selectedWLTicker) return;
-  const r = await fetch(`${API}/watchlist/${USER.user_id}`, {
+  const group = getSelectedWatchlistGroup();
+  const r = await fetch(`${API}/watchlist/${encodeURIComponent(USER.user_id)}?group=${encodeURIComponent(group)}`, {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify(selectedWLTicker)
+    body: JSON.stringify({...selectedWLTicker, group_name: group})
   });
   if (r.ok) {
     document.getElementById('wl-ticker').value = '';
     selectedWLTicker = null;
-    await loadWatchlist();
+    await loadWatchlist(false);
   }
 }
 
@@ -2264,13 +2342,13 @@ async function importWatchlistFile(event) {
     let added = 0, skipped = 0;
     for (const symbol of symbols) {
       const meta = tickerMeta(symbol);
-      const r = await fetch(`${API}/watchlist/${USER.user_id}`, {
+      const r = await fetch(`${API}/watchlist/${encodeURIComponent(USER.user_id)}?group=${encodeURIComponent(group)}`, {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({symbol, name: meta.name || symbol, industry: meta.industry || meta.sector || ''})
+        body: JSON.stringify({symbol, name: meta.name || symbol, industry: meta.industry || meta.sector || '', group_name: group})
       });
       if (r.ok) added++; else skipped++;
     }
-    if (status) status.textContent = `Import complete: ${added} added, ${skipped} skipped/already present.`;
+    if (status) status.textContent = `Import complete for ${group}: ${added} added, ${skipped} skipped/already present.`;
     await loadWatchlist();
   } catch(err) {
     if (status) status.textContent = `Import failed: ${err.message}`;
@@ -2279,29 +2357,36 @@ async function importWatchlistFile(event) {
   }
 }
 
-async function loadWatchlist() {
+async function loadWatchlist(refreshGroups = true) {
   const uid = USER?.user_id;
   if (!uid) return;
-  const items = await fetchJsonSafe(`${API}/watchlist/${uid}`, {cache:'no-store'});
-  if (!USER || USER.user_id !== uid) return;
+  if (refreshGroups) await loadWatchlistGroups();
+  const group = getSelectedWatchlistGroup();
+  activeWatchlistGroup = group;
+  const items = await fetchJsonSafe(`${API}/watchlist/${encodeURIComponent(uid)}?group=${encodeURIComponent(group)}`, {cache:'no-store'});
+  if (!USER || USER.user_id !== uid || activeWatchlistGroup !== group) return;
+  currentWatchlistItems = Array.isArray(items) ? items : [];
+  renderWatchlistItems(currentWatchlistItems);
+  setLastUpdated(`Watchlist · ${group}`);
+}
+
+function renderWatchlistItems(items) {
   const tbody = document.getElementById('watchlist-tbody');
+  if (!tbody) return;
   if (!items.length) {
-    tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state"><i class="fa fa-star"></i><p>Your watchlist is empty.</p></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><i class="fa fa-star"></i><p>Your selected watchlist group is empty.</p></div></td></tr>`;
     renderWatchlistHeatmap([]);
-    setLastUpdated('Watchlist');
     return;
   }
   tbody.innerHTML = items.map(item => `
-    <tr>
+    <tr data-watch-symbol="${escapeHtml(item.symbol)}">
       <td class="td-symbol"><a href="${tradingViewUrl(item.symbol)}" target="_blank" rel="noopener noreferrer" title="Open in TradingView">${escapeHtml(item.symbol)}</a></td>
-      <td>${item.name || '—'}</td>
-      <td><span class="badge badge-green">${item.industry || '—'}</span></td>
+      <td>${escapeHtml(item.name || '—')}</td>
       <td class="td-mono">₹${item.ltp || '—'}</td>
       <td class="td-mono">₹${item.day_high || '—'}</td>
       <td class="td-mono">₹${item.day_low || '—'}</td>
       <td class="td-mono">${fmtNum(item.volume || 0)}</td>
       <td><span class="badge ${(item.day_chg_pct||0) >= 0 ? 'badge-green' : 'badge-red'}">${(item.day_chg_pct||0) >= 0 ? '+' : ''}${item.day_chg_pct || 0}%</span></td>
-      <td class="td-mono">${item.added || '—'}</td>
       <td>
         <div class="action-icons">
           <button class="action-btn portfolio" title="Add to Portfolio" onclick="openWatchlistPortfolioModal('${encodeURIComponent(JSON.stringify({symbol:item.symbol, name:item.name || item.symbol, industry:item.industry || '', ltp:item.ltp || ''}))}')"><i class="fa fa-briefcase"></i></button>
@@ -2311,7 +2396,6 @@ async function loadWatchlist() {
     </tr>
   `).join('');
   renderWatchlistHeatmap(items);
-  setLastUpdated('Watchlist');
 }
 
 function heatmapColor(value) {
@@ -2419,15 +2503,27 @@ async function confirmWatchlistPortfolioAdd() {
 
 async function removeFromWatchlist(symbol, ev) {
   if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+  const btn = ev?.currentTarget;
   const cleanSymbol = decodeURIComponent(symbol || '');
+  const group = getSelectedWatchlistGroup();
   if (!USER || !cleanSymbol) return;
+  const previous = [...currentWatchlistItems];
+  currentWatchlistItems = currentWatchlistItems.filter(item => String(item.symbol || '').toUpperCase() !== cleanSymbol.toUpperCase());
+  renderWatchlistItems(currentWatchlistItems);
+  if (btn) btn.disabled = true;
   try {
-    await fetchJsonSafe(`${API}/watchlist/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(cleanSymbol)}`, {method:'DELETE', cache:'no-store'});
+    await fetchJsonSafe(`${API}/watchlist/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(cleanSymbol)}?group=${encodeURIComponent(group)}`, {method:'DELETE', cache:'no-store'});
+    setLastUpdated(`Watchlist item removed · ${group}`);
   } catch(err) {
-    await fetchJsonSafe(`${API}/watchlist/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(cleanSymbol)}/delete`, {method:'POST', cache:'no-store'});
+    try {
+      await fetchJsonSafe(`${API}/watchlist/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(cleanSymbol)}/delete?group=${encodeURIComponent(group)}`, {method:'POST', cache:'no-store'});
+      setLastUpdated(`Watchlist item removed · ${group}`);
+    } catch(err2) {
+      currentWatchlistItems = previous;
+      renderWatchlistItems(currentWatchlistItems);
+      alert(err2.message || 'Could not remove watchlist item');
+    }
   }
-  await loadWatchlist();
-  setLastUpdated('Watchlist item removed');
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
