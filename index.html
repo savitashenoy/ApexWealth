@@ -639,8 +639,12 @@ body.light .score-detail-table thead th { background: #e4e0d6; }
 .watchlist-load-progress.show { display:block; }
 .watchlist-progress-track { height: 7px; border-radius: 999px; background: rgba(148,163,184,.22); overflow:hidden; margin-top: 8px; }
 .watchlist-progress-bar { height: 100%; width: 0%; border-radius: 999px; background: var(--accent); transition: width .22s ease; }
-.fundamental-table tbody tr.fundamental-highlight-row td { background: #E4D6C3 !important; color: #1a1714 !important; font-weight: 700; }
-body.dark .fundamental-table tbody tr.fundamental-highlight-row td { background: #E4D6C3 !important; color: #1a1714 !important; }
+.fundamental-table tbody tr.fundamental-highlight-row,
+.fundamental-table tbody tr.fundamental-highlight-row td,
+.fundamental-table tbody tr.fundamental-highlight-row td:first-child { background: #e6a043 !important; color: #1a1714 !important; font-weight: 900; }
+body.dark .fundamental-table tbody tr.fundamental-highlight-row,
+body.dark .fundamental-table tbody tr.fundamental-highlight-row td,
+body.dark .fundamental-table tbody tr.fundamental-highlight-row td:first-child { background: #e6a043 !important; color: #1a1714 !important; }
 
 /* ── DASHBOARD ALLOCATION DONUT ── */
 .allocation-donut-card {
@@ -2701,7 +2705,14 @@ function isHighlightedFundamentalMetric(sectionTitle, metric) {
   const sectionKey = Object.keys(FUNDAMENTAL_HIGHLIGHT_ITEMS).find(k => title.includes(k));
   if (!sectionKey) return false;
   const m = normalizeFundamentalMetric(metric);
-  return FUNDAMENTAL_HIGHLIGHT_ITEMS[sectionKey].some(x => normalizeFundamentalMetric(x) === m);
+  if (!m) return false;
+  return FUNDAMENTAL_HIGHLIGHT_ITEMS[sectionKey].some(x => {
+    const target = normalizeFundamentalMetric(x);
+    // Highlight rows that contain the requested item or equivalent yfinance labels.
+    // Examples: "Net Income Common Stockholders" contains "Net Income";
+    // "Free Cash Flow" equals "FreeCashFlow" after normalization.
+    return m === target || m.includes(target) || target.includes(m);
+  });
 }
 
 function renderFundamentalTable(section) {
