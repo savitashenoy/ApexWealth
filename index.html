@@ -635,6 +635,12 @@ body.light .score-detail-table thead th { background: #e4e0d6; }
 .watchlist-add-row { display: flex; gap: 12px; margin-bottom: 16px; align-items: flex-end; }
 .watchlist-add-row .autocomplete-wrap { flex: 1; }
 .watchlist-add-row .form-group { flex: 1; }
+.watchlist-load-progress { display:none; margin: 10px 0 14px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); color: var(--text-secondary); font-size: .82rem; }
+.watchlist-load-progress.show { display:block; }
+.watchlist-progress-track { height: 7px; border-radius: 999px; background: rgba(148,163,184,.22); overflow:hidden; margin-top: 8px; }
+.watchlist-progress-bar { height: 100%; width: 0%; border-radius: 999px; background: var(--accent); transition: width .22s ease; }
+.fundamental-table tbody tr.fundamental-highlight-row td { background: #E4D6C3 !important; color: #1a1714 !important; font-weight: 700; }
+body.dark .fundamental-table tbody tr.fundamental-highlight-row td { background: #E4D6C3 !important; color: #1a1714 !important; }
 
 /* ── DASHBOARD ALLOCATION DONUT ── */
 .allocation-donut-card {
@@ -1219,6 +1225,10 @@ body.dark .watchlist-heatmap-table .hm-name { color: var(--text-secondary); }
         <input class="import-file-input" type="file" id="watchlist-import-file" accept=".csv,.xlsx,.xls" onchange="importWatchlistFile(event)"/>
       </div>
       <div class="import-hint" id="watchlist-import-status">Import adds tickers to the selected group. Supports columns named Symbol/Ticker or the first column as ticker.</div>
+      <div class="watchlist-load-progress" id="watchlist-load-progress">
+        <div id="watchlist-load-progress-text">Loading watchlist…</div>
+        <div class="watchlist-progress-track"><div class="watchlist-progress-bar" id="watchlist-load-progress-bar"></div></div>
+      </div>
       <div class="table-wrap">
         <table>
           <thead>
@@ -1481,6 +1491,7 @@ let perfCumulativeChart;
 let watchlistPortfolioItem = null;
 let watchlistGroups = ['Default'];
 let activeWatchlistGroup = 'Default';
+let watchlistGroupOwnerId = null;
 let currentWatchlistItems = [];
 let marketAutoRefreshTimer = null;
 let activeRefreshUserId = null;
@@ -1567,6 +1578,12 @@ function clearAppState() {
   selectedWLTicker = null;
   selectedAnalysisTicker = null;
   snapshotScoreCache = null;
+  watchlistGroups = ['Default'];
+  activeWatchlistGroup = 'Default';
+  watchlistGroupOwnerId = USER?.user_id || null;
+  currentWatchlistItems = [];
+  renderWatchlistGroupOptions();
+  setWatchlistLoadingProgress(0, '', false);
   ['dashBarChart','dashAllocationChart','allocIndustryChart','allocStockChart','allocBarChart','allocPnlChart','perfCumulativeChart','analysisPriceChart','analysisVolChart','analysisRetChart','scoreRadarChart','scoreContribChart','marketIndexChart'].forEach(destroyChartSafe);
   const ids = {
     'dc-holdings':'—','dc-gainers':'—','dc-losers':'—','dc-top-gainer':'—','dc-top-loser':'—','dc-avg-chg':'—',
@@ -1732,6 +1749,11 @@ function doLogout() {
   sessionStorage.removeItem('apex_user');
   clearAppState();
   USER = null;
+  watchlistGroups = ['Default'];
+  activeWatchlistGroup = 'Default';
+  watchlistGroupOwnerId = null;
+  currentWatchlistItems = [];
+  renderWatchlistGroupOptions();
   document.getElementById('app').style.display = 'none';
   document.getElementById('auth-page').style.display = 'flex';
   switchAuthTab('login');
@@ -2201,6 +2223,24 @@ function selectWLTicker(symbol, name, industry) {
 
 function closeWLAC()      { document.getElementById('wl-ac-list').style.display = 'none'; }
 
+
+function setWatchlistLoadingProgress(percent = 0, message = 'Loading watchlist…', show = true) {
+  const wrap = document.getElementById('watchlist-load-progress');
+  const bar = document.getElementById('watchlist-load-progress-bar');
+  const text = document.getElementById('watchlist-load-progress-text');
+  if (!wrap || !bar || !text) return;
+  const pct = Math.max(0, Math.min(100, Number(percent || 0)));
+  if (!show) {
+    wrap.classList.remove('show');
+    bar.style.width = '0%';
+    text.textContent = '';
+    return;
+  }
+  wrap.classList.add('show');
+  bar.style.width = `${pct}%`;
+  text.textContent = message || 'Loading watchlist…';
+}
+
 function getSelectedWatchlistGroup() {
   const sel = document.getElementById('watchlist-group-select');
   return (sel && sel.value ? sel.value : activeWatchlistGroup || 'Default').trim() || 'Default';
@@ -2219,8 +2259,17 @@ function renderWatchlistGroupOptions() {
 
 async function loadWatchlistGroups() {
   if (!USER) return;
+  const uid = USER.user_id;
+  if (watchlistGroupOwnerId !== uid) {
+    watchlistGroups = ['Default'];
+    activeWatchlistGroup = 'Default';
+    currentWatchlistItems = [];
+    watchlistGroupOwnerId = uid;
+    renderWatchlistGroupOptions();
+  }
   try {
-    const d = await fetchJsonSafe(`${API}/watchlist-groups/${encodeURIComponent(USER.user_id)}`, {cache:'no-store'});
+    const d = await fetchJsonSafe(`${API}/watchlist-groups/${encodeURIComponent(uid)}`, {cache:'no-store'});
+    if (!USER || USER.user_id !== uid) return;
     watchlistGroups = d.groups && d.groups.length ? d.groups : ['Default'];
   } catch(e) {
     watchlistGroups = watchlistGroups && watchlistGroups.length ? watchlistGroups : ['Default'];
@@ -2255,6 +2304,7 @@ async function switchWatchlistGroup() {
   selectedWLTicker = null;
   const input = document.getElementById('wl-ticker');
   if (input) input.value = '';
+  setWatchlistLoadingProgress(15, `Loading ${activeWatchlistGroup} watchlist…`, true);
   await loadWatchlist(false);
 }
 
@@ -2378,14 +2428,28 @@ async function importWatchlistFile(event) {
 async function loadWatchlist(refreshGroups = true) {
   const uid = USER?.user_id;
   if (!uid) return;
-  if (refreshGroups) await loadWatchlistGroups();
-  const group = getSelectedWatchlistGroup();
-  activeWatchlistGroup = group;
-  const items = await fetchJsonSafe(`${API}/watchlist/${encodeURIComponent(uid)}?group=${encodeURIComponent(group)}`, {cache:'no-store'});
-  if (!USER || USER.user_id !== uid || activeWatchlistGroup !== group) return;
-  currentWatchlistItems = Array.isArray(items) ? items : [];
-  renderWatchlistItems(currentWatchlistItems);
-  setLastUpdated(`Watchlist · ${group}`);
+  setWatchlistLoadingProgress(12, 'Preparing watchlist…', true);
+  try {
+    if (refreshGroups) {
+      setWatchlistLoadingProgress(28, 'Loading your watchlist groups…', true);
+      await loadWatchlistGroups();
+    }
+    const group = getSelectedWatchlistGroup();
+    activeWatchlistGroup = group;
+    setWatchlistLoadingProgress(48, `Fetching ${group} items…`, true);
+    const items = await fetchJsonSafe(`${API}/watchlist/${encodeURIComponent(uid)}?group=${encodeURIComponent(group)}`, {cache:'no-store'});
+    if (!USER || USER.user_id !== uid || activeWatchlistGroup !== group) return;
+    setWatchlistLoadingProgress(78, 'Rendering watchlist table and heat map…', true);
+    currentWatchlistItems = Array.isArray(items) ? items : [];
+    renderWatchlistItems(currentWatchlistItems);
+    setWatchlistLoadingProgress(100, 'Watchlist loaded.', true);
+    setTimeout(() => setWatchlistLoadingProgress(0, '', false), 450);
+    setLastUpdated(`Watchlist · ${group}`);
+  } catch (err) {
+    setWatchlistLoadingProgress(0, '', false);
+    const tbody = document.getElementById('watchlist-tbody');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><i class="fa fa-triangle-exclamation"></i><p>${escapeHtml(err.message || 'Unable to load watchlist.')}</p></div></td></tr>`;
+  }
 }
 
 function renderWatchlistItems(items) {
@@ -2620,6 +2684,26 @@ function fmtFinancialValue(value) {
   return escapeHtml(value);
 }
 
+
+const FUNDAMENTAL_HIGHLIGHT_ITEMS = {
+  'annual income statement': ['EBITDA', 'EBIT', 'Basic EPS', 'Net Income', 'Gross Profit', 'Total Revenue'],
+  'quarterly income statement': ['EBITDA', 'EBIT', 'Basic EPS', 'Net Income', 'Gross Profit', 'Total Revenue'],
+  'quarterly balance sheet': ['Total Debt', 'Working Capital', 'Cash Cash Equivalents And Short Term Investments', 'Current Liabilities', 'Current Assets', 'Net PPE', 'Inventory', 'Accounts Receivable'],
+  'annual cash flow': ['FreeCashFlow', 'CapitalExpenditure', 'CashDividendsPaid', 'InvestingCashFlow', 'OperatingCashFlow', 'NetIncomeFromContinuingOperations']
+};
+
+function normalizeFundamentalMetric(v) {
+  return String(v || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function isHighlightedFundamentalMetric(sectionTitle, metric) {
+  const title = String(sectionTitle || '').toLowerCase();
+  const sectionKey = Object.keys(FUNDAMENTAL_HIGHLIGHT_ITEMS).find(k => title.includes(k));
+  if (!sectionKey) return false;
+  const m = normalizeFundamentalMetric(metric);
+  return FUNDAMENTAL_HIGHLIGHT_ITEMS[sectionKey].some(x => normalizeFundamentalMetric(x) === m);
+}
+
 function renderFundamentalTable(section) {
   const columns = section.columns || [];
   const rows = section.rows || [];
@@ -2643,7 +2727,7 @@ function renderFundamentalTable(section) {
         <table class="fundamental-table">
           <thead><tr><th>Metric</th>${columns.map(c => `<th>${escapeHtml(c)}</th>`).join('')}</tr></thead>
           <tbody>
-            ${rows.map(row => `<tr><td>${escapeHtml(row.metric)}</td>${columns.map(c => `<td>${fmtFinancialValue(row.values?.[c])}</td>`).join('')}</tr>`).join('')}
+            ${rows.map(row => `<tr class="${isHighlightedFundamentalMetric(section.title, row.metric) ? 'fundamental-highlight-row' : ''}"><td>${escapeHtml(row.metric)}</td>${columns.map(c => `<td>${fmtFinancialValue(row.values?.[c])}</td>`).join('')}</tr>`).join('')}
           </tbody>
         </table>
       </div>
