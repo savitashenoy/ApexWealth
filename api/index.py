@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify, send_from_directory, Response
 from flask_cors import CORS
-import json, os, hashlib, uuid, time
+import json, os, hashlib, uuid, time, operator
 from datetime import datetime, date
 from urllib.parse import urlparse, unquote
 import html as html_lib
@@ -2248,7 +2248,7 @@ def screener_rsi(prices, period=14):
     rs = avg_gain / avg_loss.replace(0, np.nan)
     return 100 - (100 / (1 + rs))
 
-def screener_bollinger_position(close, length=20, std=2.0):
+def screener_bollinger_position(close, length=20, std=2.0, mode='volume'):
     if len(close.dropna()) < length:
         return 'NA'
     ma = close.rolling(length).mean()
@@ -2269,22 +2269,29 @@ def screener_bollinger_position(close, length=20, std=2.0):
     band_width = bb_upper - bb_lower
     if band_width <= 0: return 'Mid Band'
     pct = ((current_price - bb_lower) / band_width) * 100
+    if mode == 'priceaction':
+        half_upper = bb_middle + 0.5 * (bb_upper - bb_middle)
+        half_lower = bb_lower + 0.5 * (bb_middle - bb_lower)
+        if current_price > half_upper: return 'Upper Zone'
+        if current_price > bb_middle: return 'Above Mid'
+        if current_price > half_lower: return 'Below Mid'
+        return 'Lower Zone'
     if pct > 75: return 'Upper Band'
     if pct > 60: return 'Above Mid'
     if pct >= 40: return 'Mid Band'
     if pct >= 25: return 'Below Mid'
     return 'Lower Band'
 
-def screener_fetch_history(symbol, interval, period=None, days=None):
+def screener_fetch_history(symbol, interval, period=None, days=None, auto_adjust=False):
     symbol = screener_normalize_symbol(symbol)
     try:
         ticker = yf.Ticker(symbol)
         if period:
-            df = ticker.history(period=period, interval=interval, auto_adjust=False)
+            df = ticker.history(period=period, interval=interval, auto_adjust=auto_adjust)
         else:
             end = datetime.now()
             start = end - pd.Timedelta(days=days or 365)
-            df = ticker.history(start=start, end=end, interval=interval, auto_adjust=False)
+            df = ticker.history(start=start, end=end, interval=interval, auto_adjust=auto_adjust)
         if df is None or df.empty:
             return pd.DataFrame()
         df = df.rename(columns={c: str(c).lower() for c in df.columns})
@@ -2376,6 +2383,172 @@ def screener_check_volume_symbol(symbol, config):
         }
     return False, 'No volume breakout'
 
+
+def screener_clean_display_symbol(symbol):
+    return screener_normalize_symbol(symbol).replace('.NS','').replace('.BO','')
+
+# Opening Range Breakout + OpenHigh/OpenLow
+def screener_check_ohl_symbol(symbol):
+    df = screener_fetch_history(symbol, interval='1d', period='1mo')
+    if df.empty or len(df) < 2:
+        return False, 'Insufficient daily data'
+    df = df.sort_index()
+    latest = df.iloc[-1]
+    d_open = float(latest['open']); d_high = float(latest['high']); d_low = float(latest['low']); d_close = float(latest['close'])
+    open_hl = '-'; action = '-'
+    if abs(d_open - d_high) < 0.05:
+        open_hl, action = 'OpenHigh', 'Bearish'
+    elif abs(d_open - d_low) < 0.05:
+        open_hl, action = 'OpenLow', 'Bullish'
+    else:
+        return False, 'Neither OpenHigh nor OpenLow'
+    rsi = screener_rsi(df['close'], 14).iloc[-1]
+    prev_close = float(df.iloc[-2]['close'])
+    change_pct = ((d_close - prev_close) / prev_close) * 100 if prev_close else 0
+    return True, {
+        'result_type': 'ohl', 'symbol': screener_clean_display_symbol(symbol), 'ltp': round(d_close,2),
+        'change_pct': round(change_pct,2), 'rsi14': round(float(rsi),2) if not pd.isna(rsi) else None,
+        'open_hl': open_hl, 'action_type': action,
+    }
+
+def screener_check_orb_symbol(symbol, config):
+    start_time = config.get('start_time', '09:15')
+    end_time = config.get('end_time', '10:00')
+    vol_mult = float(config.get('vol_multiplier', 1.5))
+    interval = config.get('interval', '15m')
+    df = screener_fetch_history(symbol, interval=interval, period='2d')
+    if df.empty or len(df) < 5:
+        return False, 'Insufficient intraday data'
+    try:
+        if df.index.tz is None:
+            df.index = df.index.tz_localize('UTC').tz_convert('Asia/Kolkata')
+        else:
+            df.index = df.index.tz_convert('Asia/Kolkata')
+    except Exception:
+        return False, 'Timezone conversion failed'
+    df = df.sort_index()
+    last_date = df.index[-1].date()
+    today = df[df.index.date == last_date].copy()
+    if today.empty:
+        return False, 'No current day data'
+    try:
+        range_data = today.between_time(start_time, end_time)
+    except Exception:
+        return False, 'Invalid ORB time range'
+    if range_data.empty:
+        return False, 'Opening range empty'
+    opening_high = float(range_data['high'].max()); opening_low = float(range_data['low'].min())
+    avg_range_volume = float(range_data['volume'].mean()) or 1.0
+    latest = today.iloc[-1]
+    current_close = float(latest['close']); current_volume = float(latest['volume'])
+    if current_volume <= avg_range_volume * vol_mult:
+        return False, 'Volume condition not met'
+    signal = None; breakout_level = 0.0
+    if current_close > opening_high:
+        signal = 'Bullish'; breakout_level = opening_high
+    elif current_close < opening_low:
+        signal = 'Bearish'; breakout_level = opening_low
+    if not signal:
+        return False, 'No ORB breakout'
+    daily_open = float(today.iloc[0]['open']); daily_high = float(today['high'].max()); daily_low = float(today['low'].min())
+    open_status = '-'
+    if abs(daily_open - daily_high) < 0.05: open_status = 'OpenHigh'
+    elif abs(daily_open - daily_low) < 0.05: open_status = 'OpenLow'
+    rsi = screener_rsi(df['close'], 14).iloc[-1]
+    prev_close = float(df['close'].iloc[-2]) if len(df) > 1 else current_close
+    change_pct = ((current_close - prev_close) / prev_close) * 100 if prev_close else 0
+    vol_x = current_volume / avg_range_volume if avg_range_volume else 0
+    return True, {
+        'result_type': 'orb', 'symbol': screener_clean_display_symbol(symbol), 'signal': signal,
+        'breakout_level': round(breakout_level,2), 'ltp': round(current_close,2), 'open_hl': open_status,
+        'change_pct': round(change_pct,2), 'rsi14': round(float(rsi),2) if not pd.isna(rsi) else None,
+        'vol_x': round(vol_x,1),
+    }
+
+def screener_check_orb_app_symbol(symbol, config):
+    rows = []
+    if bool(config.get('run_ohl', True)):
+        matched, details = screener_check_ohl_symbol(symbol)
+        if matched and isinstance(details, dict): rows.append(details)
+    if bool(config.get('run_orb', True)):
+        matched, details = screener_check_orb_symbol(symbol, config)
+        if matched and isinstance(details, dict): rows.append(details)
+    return rows
+
+SCREENER_INTRADAY_MAP = {'5 minute':'5m', '15 minute':'15m', '60 minute':'60m'}
+SCREENER_OPS = {'<': operator.lt, '<=': operator.le, '=': lambda a,b: abs(a-b)<1e-9, '>=': operator.ge, '>': operator.gt}
+
+def screener_candle_value(offset_str, period, value_type, data_d, data_w, data_m, intraday_data):
+    try:
+        offset = int(str(offset_str).split(' ')[0])
+        if period in SCREENER_INTRADAY_MAP:
+            df = intraday_data.get(SCREENER_INTRADAY_MAP[period])
+        elif period == 'Day': df = data_d
+        elif period == 'Week': df = data_w
+        else: df = data_m
+        if df is None or df.empty: return None
+        idx = offset - 1
+        if abs(idx) > len(df.index): return None
+        col = str(value_type).lower()
+        if col not in df.columns: return None
+        return float(df[col].iloc[idx])
+    except Exception:
+        return None
+
+def screener_check_priceaction_symbol(symbol, config):
+    conditions = [c for c in config.get('conditions', []) if c.get('active')]
+    if not conditions:
+        return False, 'No active conditions'
+    required_intraday = {SCREENER_INTRADAY_MAP[p] for cond in conditions for p in [cond.get('period1'), cond.get('period2')] if p in SCREENER_INTRADAY_MAP}
+    data_d = screener_fetch_history(symbol, interval='1d', period='1y', auto_adjust=True)
+    if data_d.empty or len(data_d) < 21:
+        return False, 'Insufficient daily data'
+    data_w = screener_fetch_history(symbol, interval='1wk', period='5y', auto_adjust=True)
+    data_m = screener_fetch_history(symbol, interval='1mo', period='5y', auto_adjust=True)
+    if data_w.empty or data_m.empty:
+        return False, 'Insufficient weekly/monthly data'
+    intraday_data = {}
+    for interval in required_intraday:
+        intraday_data[interval] = screener_fetch_history(symbol, interval=interval, period='60d', auto_adjust=True)
+    for cond in conditions:
+        val1 = screener_candle_value(cond.get('offset1','0 (current)'), cond.get('period1','Day'), cond.get('value1','CLOSE'), data_d, data_w, data_m, intraday_data)
+        val2 = screener_candle_value(cond.get('offset2','-1 (ago)'), cond.get('period2','Month'), cond.get('value2','HIGH'), data_d, data_w, data_m, intraday_data)
+        op = SCREENER_OPS.get(cond.get('operator','<'))
+        if val1 is None or val2 is None or op is None or not op(val1, val2):
+            return False, 'Conditions not met'
+    close = data_d['close']; latest_d = data_d.iloc[-1]; latest_w = data_w.iloc[-1]; latest_m = data_m.iloc[-1]
+    rsi = screener_rsi(close, 14).iloc[-1]
+    bb_pos = screener_bollinger_position(close, mode='priceaction')
+    ltp = float(latest_d['close'])
+    prev_d = float(data_d['close'].iloc[-2]) if len(data_d) > 1 else ltp
+    prev_w = float(data_w['close'].iloc[-2]) if len(data_w) > 1 else ltp
+    prev_m = float(data_m['close'].iloc[-2]) if len(data_m) > 1 else ltp
+    volume = int(latest_d.get('volume', 0))
+    prev_10_vol_max = float(data_d['volume'].iloc[-11:-1].max()) if 'volume' in data_d.columns and len(data_d) >= 11 else 0
+    return True, {
+        'symbol': screener_normalize_symbol(symbol), 'ltp': round(ltp,2),
+        'change_pct': round(((ltp-prev_d)/prev_d)*100,2) if prev_d else 0,
+        'rsi_val': round(float(rsi),2) if not pd.isna(rsi) else None, 'bb_pos': bb_pos,
+        'd_close_pct': round(((ltp-prev_d)/prev_d)*100,2) if prev_d else 0,
+        'w_close_pct': round(((ltp-prev_w)/prev_w)*100,2) if prev_w else 0,
+        'm_close_pct': round(((ltp-prev_m)/prev_m)*100,2) if prev_m else 0,
+        'volume': volume, 'vol10day_high': bool(volume > prev_10_vol_max) if prev_10_vol_max else False,
+    }
+
+def screener_scan_symbol(scanner, symbol, config):
+    if scanner == 'ema':
+        matched, details = screener_check_ema_symbol(symbol, config)
+        return [details] if matched and isinstance(details, dict) else []
+    if scanner == 'volume':
+        matched, details = screener_check_volume_symbol(symbol, config)
+        return [details] if matched and isinstance(details, dict) else []
+    if scanner == 'orb':
+        return screener_check_orb_app_symbol(symbol, config)
+    if scanner == 'priceaction':
+        matched, details = screener_check_priceaction_symbol(symbol, config)
+        return [details] if matched and isinstance(details, dict) else []
+    raise ValueError('Unknown scanner')
+
 def screener_iter_scan_events(sheet_name, scanner, config, max_symbols=None):
     symbols = screener_load_symbols(sheet_name)
     if max_symbols:
@@ -2387,8 +2560,7 @@ def screener_iter_scan_events(sheet_name, scanner, config, max_symbols=None):
     for i, symbol in enumerate(symbols, start=1):
         yield event({'type':'progress','symbol':symbol,'scanned':i-1,'total':total,'matches':matches,'percent':round((i-1)/total*100,2) if total else 100,'message':f'Scanning {symbol} ({i}/{total})'})
         try:
-            matched, details = screener_check_ema_symbol(symbol, config) if scanner == 'ema' else screener_check_volume_symbol(symbol, config)
-            if matched and isinstance(details, dict):
+            for details in screener_scan_symbol(scanner, symbol, config):
                 matches += 1
                 yield event({'type':'result','symbol':symbol,'row':details,'scanned':i,'total':total,'matches':matches,'percent':round(i/total*100,2) if total else 100})
         except Exception as exc:
@@ -2411,8 +2583,8 @@ def api_screener_symbols():
 
 @app.route('/api/screener/scan_stream/<scanner>', methods=['POST'])
 def api_screener_scan_stream(scanner):
-    if scanner not in {'ema', 'volume'}:
-        return jsonify({'error': "scanner must be 'ema' or 'volume'"}), 400
+    if scanner not in {'ema', 'volume', 'orb', 'priceaction'}:
+        return jsonify({'error': "scanner must be one of: ema, volume, orb, priceaction"}), 400
     payload = get_request_json()
     sheet = payload.get('sheet')
     config = payload.get('config', {})

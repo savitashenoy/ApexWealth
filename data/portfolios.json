@@ -1,53 +1,23 @@
 {
-  "409374c8-a0b7-46a7-a2e0-63e91a6270cf": [
+  "049f3860-b5ca-45fe-b8f2-7e3e3c2ff2fd": [
     {
-      "id": "b74b0ee6-04fc-498d-9c97-b3875469da71",
+      "id": "82641e9d-bc35-40a5-b78d-09034d1ffe1a",
       "symbol": "GMDCLTD",
       "name": "Gujarat Mineral Development Corporation Limited",
-      "buy_price": 570.0,
-      "qty": 100.0,
+      "buy_price": 599.0,
+      "qty": 1000.0,
       "date": "2026-06-13",
       "industry": "Metals & Mining",
       "sector": ""
     },
     {
-      "id": "0f8c227f-713e-49ae-bce6-29d444ba1526",
+      "id": "bb49cf2d-fb1b-4b25-b800-b3c85d634e29",
       "symbol": "CDSL",
       "name": "Central Depository Services (India) Limited",
-      "buy_price": 1100.0,
-      "qty": 100.0,
+      "buy_price": 1190.0,
+      "qty": 1000.0,
       "date": "2026-06-13",
       "industry": "Financial Services",
-      "sector": ""
-    },
-    {
-      "id": "30e6aa11-eb8c-4c79-939c-2ecc8e229977",
-      "symbol": "CIPLA",
-      "name": "Cipla Limited",
-      "buy_price": 1100.0,
-      "qty": 50.0,
-      "date": "2026-06-13",
-      "industry": "Healthcare",
-      "sector": ""
-    },
-    {
-      "id": "cbe7c383-ed64-4e24-b5a6-02cb5901beb7",
-      "symbol": "BEL",
-      "name": "Bharat Electronics Limited",
-      "buy_price": 390.0,
-      "qty": 100.0,
-      "date": "2026-06-13",
-      "industry": "Capital Goods",
-      "sector": ""
-    },
-    {
-      "id": "026ca1b4-1454-4b7b-b9ce-52c4776144b0",
-      "symbol": "ACC",
-      "name": "ACC Limited",
-      "buy_price": 990.0,
-      "qty": 50.0,
-      "date": "2026-06-13",
-      "industry": "Construction Materials",
       "sector": ""
     }
   ]

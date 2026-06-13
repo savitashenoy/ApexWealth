@@ -977,10 +977,29 @@ body.dark .watchlist-heatmap-table .hm-name { color: var(--text-secondary); }
 .screener-bb-upper-row td { background:#00F700 !important; color:#062b06 !important; font-weight:900; }
 .screener-bb-mid-row td { background:#00FFFF !important; color:#063334 !important; font-weight:900; }
 .screener-bb-lower-row td { background:#FF5555 !important; color:#fff !important; font-weight:900; }
+
+.screener-compact-conditions { grid-template-columns: repeat(5, minmax(100px, 1fr)); gap:6px; }
+.screener-compact-conditions label, .screener-filter-conditions label { font-size:.56rem; letter-spacing:.45px; gap:3px; }
+.screener-compact-conditions input, .screener-compact-conditions select, .screener-filter-conditions input, .screener-filter-conditions select { padding:6px 7px; font-size:.66rem; border-radius:7px; min-width:0; }
+.screener-filter-conditions { grid-template-columns: repeat(6, minmax(95px, 1fr)); gap:6px; }
+.screener-pa-filters { grid-template-columns: repeat(5, minmax(100px, 1fr)); gap:6px; }
+.screener-condition-header, .screener-condition-row { display:grid; grid-template-columns:48px repeat(7, minmax(78px, 1fr)); gap:6px; align-items:center; }
+.screener-condition-header { color:var(--dim); font-weight:900; font-size:.6rem; text-transform:uppercase; letter-spacing:.6px; margin-top:10px; padding:0 2px; }
+.screener-condition-row { margin-top:6px; }
+.screener-condition-row input[type="checkbox"] { width:18px; height:18px; justify-self:center; }
+.screener-condition-row select { background:var(--bg); border:1px solid var(--border2); color:#000 !important; border-radius:7px; padding:6px 7px; font-family:'JetBrains Mono',monospace; font-size:.66rem; min-width:0; }
+.screener-orb-sub-tabs { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+.screener-orb-sub-tab { border:1px solid var(--border); background:var(--card); color:var(--dim); padding:8px 11px; border-radius:9px; font-weight:900; cursor:pointer; }
+.screener-orb-sub-tab.active, .screener-orb-sub-tab:hover { background:var(--accent); border-color:var(--accent); color:#000 !important; }
+.screener-orb-sub-pane { display:none; }
+.screener-orb-sub-pane.active { display:block; }
+.screener-bullish-row td, .screener-pa-upper-row td { background:#2E6F40 !important; color:#fff !important; font-weight:900; }
+.screener-bearish-row td, .screener-pa-lower-row td { background:#FF2C2C !important; color:#fff !important; font-weight:900; }
+.screener-pa-mid-row td { background:#e6a043 !important; color:#111 !important; font-weight:900; }
 body.light .screener-card, body.light .screener-tab-btn { background:#f5f2eb; }
-@media (max-width: 1180px) { .screener-volume-conditions, .screener-ema-conditions { grid-template-columns:repeat(3,1fr); } }
+@media (max-width: 1180px) { .screener-volume-conditions, .screener-ema-conditions, .screener-compact-conditions, .screener-filter-conditions, .screener-pa-filters { grid-template-columns:repeat(3,1fr); } .screener-condition-header, .screener-condition-row { grid-template-columns:40px repeat(3, minmax(90px, 1fr)); } }
 @media (max-width: 980px) { .screener-hero { grid-template-columns:1fr; } .screener-controls { grid-template-columns:repeat(2,1fr); } .screener-top-controls { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 620px) { .screener-controls, .screener-top-controls, .screener-volume-conditions, .screener-ema-conditions { grid-template-columns:1fr; } }
+@media (max-width: 620px) { .screener-controls, .screener-top-controls, .screener-volume-conditions, .screener-ema-conditions, .screener-compact-conditions, .screener-filter-conditions, .screener-pa-filters, .screener-condition-header, .screener-condition-row { grid-template-columns:1fr; } }
 
 </style>
 </head>
@@ -1421,7 +1440,7 @@ body.light .screener-card, body.light .screener-tab-btn { background:#f5f2eb; }
       <div class="screener-hero">
         <div class="screener-card">
           <div class="screener-title"><i class="fa fa-radar"></i> Integrated Stock Scanner</div>
-          <div class="screener-sub">Run EMA + RSI Bullish Reversal and Volume & Price Breakout scans from the bundled Excel sheet source. Results stream live with progress updates.</div>
+          <div class="screener-sub">Run EMA + RSI, Volume & Price Breakout, Opening Range Breakout, and Price Action scans from the bundled Excel sheet source. Results stream live with progress updates.</div>
           <div class="screener-controls screener-top-controls">
             <label>Sheet Source<select id="screener-sheet-select"></select></label>
             <button class="btn btn-outline" onclick="screenerLoadSymbols()"><i class="fa fa-list"></i> Load Symbols</button>
@@ -1437,6 +1456,8 @@ body.light .screener-card, body.light .screener-tab-btn { background:#f5f2eb; }
       <div class="screener-tabs">
         <button class="screener-tab-btn active" data-screener-tab="ema" onclick="screenerSwitchTab('ema', this)">EMA + RSI Bullish Reversal</button>
         <button class="screener-tab-btn" data-screener-tab="volume" onclick="screenerSwitchTab('volume', this)">Volume & Price Breakout</button>
+        <button class="screener-tab-btn" data-screener-tab="orb" onclick="screenerSwitchTab('orb', this)">Opening Range Breakout</button>
+        <button class="screener-tab-btn" data-screener-tab="priceaction" onclick="screenerSwitchTab('priceaction', this)">Price Action Conditions</button>
       </div>
 
       <div class="screener-panel active" id="screener-panel-ema">
@@ -1477,6 +1498,64 @@ body.light .screener-card, body.light .screener-tab-btn { background:#f5f2eb; }
           <div class="screener-table-wrap"><table><thead><tr><th>Symbol</th><th>Prev 5 Period Vol</th><th>Curr 5 Period Vol</th><th>Current Price</th><th>Vol Ratio</th><th>Price Change %</th><th>RSI</th><th>BB Position</th><th>Chart</th></tr></thead><tbody id="screener-volume-tbody"></tbody></table></div>
         </div>
       </div>
+
+      <div class="screener-panel" id="screener-panel-orb">
+        <div class="screener-card">
+          <div class="screener-title">Opening Range Breakout + Open High/Low Scanner</div>
+          <div class="screener-controls screener-compact-conditions">
+            <label class="check-label"><span>Run 15 Min ORB</span><input id="screener-run-orb" type="checkbox" checked></label>
+            <label class="check-label"><span>Run Open H/L</span><input id="screener-run-ohl" type="checkbox" checked></label>
+            <label>ORB Start<input id="screener-orb-start" type="time" value="09:15"></label>
+            <label>ORB End<input id="screener-orb-end" type="time" value="10:00"></label>
+            <label>Min Vol Mult(X)<input id="screener-orb-vol-mult" type="number" value="1.5" step="0.1"></label>
+          </div>
+          <div class="screener-controls screener-filter-conditions">
+            <label>Signal<select id="screener-orb-signal-filter"><option>All</option><option>Bullish</option><option>Bearish</option></select></label>
+            <label>Open H/L<select id="screener-orb-openhl-filter"><option>All</option><option>OpenHigh</option><option>OpenLow</option><option>-</option></select></label>
+            <label>RSI Op<select id="screener-orb-rsi-op"><option>&gt;</option><option>&lt;</option><option>&gt;=</option><option>&lt;=</option><option>=</option></select></label>
+            <label>RSI Value<input id="screener-orb-rsi-value" type="number" step="0.1" placeholder="Any"></label>
+            <label>VolumeX Op<select id="screener-orb-volx-op"><option>&gt;</option><option>&lt;</option><option>&gt;=</option><option>&lt;=</option><option>=</option></select></label>
+            <label>VolumeX Value<input id="screener-orb-volx-value" type="number" step="0.1" placeholder="Any"></label>
+          </div>
+          <div class="screener-actions">
+            <button class="btn btn-primary screener-run-btn" onclick="screenerRunScan('orb')"><i class="fa fa-play"></i> Run Scan</button>
+            <button class="btn btn-outline screener-stop-btn" onclick="screenerStopScan()" disabled><i class="fa fa-stop"></i> Stop Scan</button>
+            <button class="btn btn-outline" onclick="screenerClearResults('orb')"><i class="fa fa-trash"></i> Clear Results</button>
+          </div>
+          <div class="screener-orb-sub-tabs">
+            <button class="screener-orb-sub-tab active" type="button" data-orb-subtab="screener-orb-results-pane" onclick="screenerSwitchOrbSubtab(this)">15 Minutes ORB Results</button>
+            <button class="screener-orb-sub-tab" type="button" data-orb-subtab="screener-ohl-results-pane" onclick="screenerSwitchOrbSubtab(this)">OpenHighLow Results</button>
+          </div>
+          <div class="screener-orb-sub-pane active" id="screener-orb-results-pane">
+            <div class="screener-table-wrap"><table><thead><tr><th>Symbol</th><th>Signal</th><th>Breakout Lvl</th><th>LTP</th><th>Open H/L</th><th>Change %</th><th>RSI(14)</th><th>VolumeX</th><th>Chart</th></tr></thead><tbody id="screener-orb-tbody"></tbody></table></div>
+          </div>
+          <div class="screener-orb-sub-pane" id="screener-ohl-results-pane">
+            <div class="screener-table-wrap"><table><thead><tr><th>Symbol</th><th>LTP</th><th>Change %</th><th>RSI(14)</th><th>Open H/L</th><th>ActionType</th><th>Chart</th></tr></thead><tbody id="screener-ohl-tbody"></tbody></table></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="screener-panel" id="screener-panel-priceaction">
+        <div class="screener-card">
+          <div class="screener-title">Price Action Condition Scanner</div>
+          <div class="screener-controls screener-pa-filters">
+            <label>RSI Filter<select id="screener-pa-rsi-op"><option>Any</option><option>Greater Than</option><option>Less Than</option></select></label>
+            <label>RSI Value<input id="screener-pa-rsi-value" type="number" value="70"></label>
+            <label>BB Filter<select id="screener-pa-bb-filter"><option>Any</option><option>Above Band</option><option>Below Band</option><option>At Upper</option><option>At Lower</option><option>At Middle</option><option>Upper Zone</option><option>Lower Zone</option><option>Above Mid</option><option>Below Mid</option><option>N/A</option></select></label>
+            <label>Change % Op<select id="screener-pa-change-op"><option>Any</option><option>&gt;</option><option>&lt;</option><option>&gt;=</option><option>&lt;=</option></select></label>
+            <label>Change % Value<input id="screener-pa-change-value" type="number" value="2" step="0.1"></label>
+          </div>
+          <div class="screener-condition-header"><span>On</span><span>Offset</span><span>Period</span><span>Value</span><span>Op</span><span>Offset</span><span>Period</span><span>Value</span></div>
+          <div id="screener-pa-conditions"></div>
+          <div class="screener-actions">
+            <button class="btn btn-primary screener-run-btn" onclick="screenerRunScan('priceaction')"><i class="fa fa-play"></i> Run Scan</button>
+            <button class="btn btn-outline screener-stop-btn" onclick="screenerStopScan()" disabled><i class="fa fa-stop"></i> Stop Scan</button>
+            <button class="btn btn-outline" onclick="screenerClearResults('priceaction')"><i class="fa fa-trash"></i> Clear Results</button>
+          </div>
+          <div class="screener-table-wrap"><table><thead><tr><th>Symbol</th><th>LTP</th><th>Change %</th><th>RSI</th><th>BB Position</th><th>D-Close %</th><th>W-Close %</th><th>M-Close %</th><th>Volume</th><th>10DayVol</th><th>Chart</th></tr></thead><tbody id="screener-pa-tbody"></tbody></table></div>
+        </div>
+      </div>
+
       <div class="screener-actions" style="justify-content:flex-start;margin-top:14px"><button class="btn btn-outline" onclick="screenerExportCsv()"><i class="fa fa-file-csv"></i> Export Active Results CSV</button></div>
     </div>
 
@@ -3372,7 +3451,7 @@ function dashboardAllocationDoughnutOpts(totalInvested) {
 // SCREENER
 // ──────────────────────────────────────────────────────────────────────────────
 let screenerActive = 'ema';
-let screenerResults = { ema: [], volume: [] };
+let screenerResults = { ema: [], volume: [], orb: [], ohl: [], priceaction: [] };
 let screenerRunning = false;
 let screenerAbortController = null;
 let screenerInitialized = false;
@@ -3393,6 +3472,8 @@ function screenerTradingViewUrl(symbol, interval) {
 async function screenerInit() {
   if (screenerInitialized) return;
   screenerInitialized = true;
+  screenerCreatePriceActionConditions();
+  screenerWireAdvancedFilters();
   await screenerLoadSheets();
 }
 async function screenerLoadSheets() {
@@ -3439,6 +3520,68 @@ function screenerEmaConfig() {
 function screenerVolumeConfig() {
   return { interval: screenerEl('screener-vol-interval').value, volume_threshold: Number(screenerEl('screener-vol-threshold').value || 2), price_threshold: Number(screenerEl('screener-price-threshold').value || 3), min_price: Number(screenerEl('screener-min-price').value || 100), rsi_threshold: Number(screenerEl('screener-rsi-threshold').value || 55), rsi_length: Number(screenerEl('screener-rsi-length').value || 14) };
 }
+
+function screenerOrbConfig() {
+  return {
+    run_orb: !!screenerEl('screener-run-orb')?.checked,
+    run_ohl: !!screenerEl('screener-run-ohl')?.checked,
+    start_time: screenerEl('screener-orb-start')?.value || '09:15',
+    end_time: screenerEl('screener-orb-end')?.value || '10:00',
+    vol_multiplier: Number(screenerEl('screener-orb-vol-mult')?.value || 1.5),
+    interval: '15m'
+  };
+}
+function screenerCreateSelect(options, selected, cls) {
+  const select = document.createElement('select');
+  if (cls) select.className = cls;
+  options.forEach((value) => { const opt = document.createElement('option'); opt.value = value; opt.textContent = value; if (value === selected) opt.selected = true; select.appendChild(opt); });
+  return select;
+}
+function screenerCreatePriceActionConditions() {
+  const container = screenerEl('screener-pa-conditions'); if (!container || container.dataset.ready === '1') return;
+  container.innerHTML = ''; container.dataset.ready = '1';
+  const offsets = Array.from({ length: 31 }, (_, i) => `${-i} (${i === 0 ? 'current' : 'ago'})`);
+  const periods = ['5 minute', '15 minute', '60 minute', 'Day', 'Week', 'Month'];
+  const values = ['OPEN', 'HIGH', 'LOW', 'CLOSE'];
+  const ops = ['<', '<=', '=', '>=', '>'];
+  for (let i = 1; i <= 6; i += 1) {
+    const row = document.createElement('div'); row.className = 'screener-condition-row'; row.dataset.row = String(i);
+    const active = document.createElement('input'); active.type = 'checkbox'; active.className = 'screener-pa-active'; if (i === 1) active.checked = true;
+    const offset1 = screenerCreateSelect(offsets, '0 (current)', 'screener-pa-offset1');
+    const period1 = screenerCreateSelect(periods, 'Day', 'screener-pa-period1');
+    const value1 = screenerCreateSelect(values, 'CLOSE', 'screener-pa-value1');
+    const op = screenerCreateSelect(ops, '<', 'screener-pa-operator');
+    const offset2 = screenerCreateSelect(offsets, '-1 (ago)', 'screener-pa-offset2');
+    const period2 = screenerCreateSelect(periods, 'Month', 'screener-pa-period2');
+    const value2 = screenerCreateSelect(values, 'HIGH', 'screener-pa-value2');
+    [active, offset1, period1, value1, op, offset2, period2, value2].forEach((el) => row.appendChild(el));
+    container.appendChild(row);
+  }
+}
+function screenerPriceActionConfig() {
+  screenerCreatePriceActionConditions();
+  const conditions = [];
+  document.querySelectorAll('.screener-condition-row').forEach((row) => {
+    conditions.push({
+      active: row.querySelector('.screener-pa-active')?.checked,
+      offset1: row.querySelector('.screener-pa-offset1')?.value,
+      period1: row.querySelector('.screener-pa-period1')?.value,
+      value1: row.querySelector('.screener-pa-value1')?.value,
+      operator: row.querySelector('.screener-pa-operator')?.value,
+      offset2: row.querySelector('.screener-pa-offset2')?.value,
+      period2: row.querySelector('.screener-pa-period2')?.value,
+      value2: row.querySelector('.screener-pa-value2')?.value,
+    });
+  });
+  return { conditions };
+}
+function screenerConfig(scanner) {
+  if (scanner === 'ema') return screenerEmaConfig();
+  if (scanner === 'volume') return screenerVolumeConfig();
+  if (scanner === 'orb') return screenerOrbConfig();
+  if (scanner === 'priceaction') return screenerPriceActionConfig();
+  return {};
+}
 function screenerSetControls(running) {
   screenerRunning = running;
   document.querySelectorAll('.screener-run-btn').forEach(btn => btn.disabled = running);
@@ -3450,9 +3593,19 @@ function screenerStopScan() {
   screenerAbortController.abort(); screenerStatus('Stopping scan…');
 }
 function screenerClearResults(scanner = screenerActive) {
-  screenerResults[scanner] = [];
-  const tbody = screenerEl(scanner === 'ema' ? 'screener-ema-tbody' : 'screener-volume-tbody');
-  if (tbody) tbody.innerHTML = '';
+  if (scanner === 'orb') {
+    screenerResults.orb = [];
+    screenerResults.ohl = [];
+    const orbBody = screenerEl('screener-orb-tbody'); if (orbBody) orbBody.innerHTML = '';
+    const ohlBody = screenerEl('screener-ohl-tbody'); if (ohlBody) ohlBody.innerHTML = '';
+  } else if (scanner === 'priceaction') {
+    screenerResults.priceaction = [];
+    const paBody = screenerEl('screener-pa-tbody'); if (paBody) paBody.innerHTML = '';
+  } else {
+    screenerResults[scanner] = [];
+    const tbody = screenerEl(scanner === 'ema' ? 'screener-ema-tbody' : 'screener-volume-tbody');
+    if (tbody) tbody.innerHTML = '';
+  }
   if (!screenerRunning) { screenerSetProgress({percent:0, symbol:'-', scanned:0, total:0, matches:0}); screenerStatus(`${scanner.toUpperCase()} results cleared.`); }
 }
 function screenerNumberValue(value) { const n = Number(String(value ?? '').replace('%','')); return Number.isFinite(n) ? n : 0; }
@@ -3481,11 +3634,104 @@ function screenerAppendVolume(row) {
   tr.innerHTML = `<td>${escapeHtml(row.symbol)}</td><td>${Number(row.prev_5_vol || 0).toLocaleString()}</td><td>${Number(row.curr_5_vol || 0).toLocaleString()}</td><td>${escapeHtml(row.current_price)}</td><td>${escapeHtml(row.volume_ratio)}</td><td>${escapeHtml(row.price_change_pct)}%</td><td>${escapeHtml(row.rsi)}</td><td>${escapeHtml(row.bb_position)}</td><td><a class="screener-chart-link" href="${screenerTradingViewUrl(row.symbol, interval)}" target="_blank" rel="noopener">Open</a></td>`;
   tbody.appendChild(tr);
 }
+
+function screenerCompare(value, op, threshold) {
+  if (threshold === '' || threshold === null || threshold === undefined) return true;
+  const v = Number(value); const t = Number(threshold);
+  if (!Number.isFinite(v) || !Number.isFinite(t)) return true;
+  if (op === '>') return v > t; if (op === '<') return v < t; if (op === '>=') return v >= t; if (op === '<=') return v <= t; if (op === '=') return Math.abs(v - t) < 0.001;
+  return true;
+}
+function screenerPassesOrbFilters(row) {
+  const signalFilter = screenerEl('screener-orb-signal-filter')?.value || 'All';
+  const openFilter = screenerEl('screener-orb-openhl-filter')?.value || 'All';
+  const signal = row.signal || row.action_type || '-';
+  if (signalFilter !== 'All' && signalFilter !== signal) return false;
+  if (openFilter !== 'All' && openFilter !== row.open_hl) return false;
+  if (!screenerCompare(row.rsi14, screenerEl('screener-orb-rsi-op')?.value || '>', screenerEl('screener-orb-rsi-value')?.value)) return false;
+  if (row.result_type === 'orb' && !screenerCompare(row.vol_x, screenerEl('screener-orb-volx-op')?.value || '>', screenerEl('screener-orb-volx-value')?.value)) return false;
+  return true;
+}
+function screenerAppendOrbRowToDom(row, push = true) {
+  if (push) screenerResults.orb.push(row);
+  if (!screenerPassesOrbFilters(row)) return;
+  const tbody = screenerEl('screener-orb-tbody'); if (!tbody) return;
+  const tr = document.createElement('tr'); tr.classList.add(row.signal === 'Bullish' ? 'screener-bullish-row' : 'screener-bearish-row');
+  tr.innerHTML = `<td>${escapeHtml(row.symbol)}</td><td>${escapeHtml(row.signal)}</td><td>${escapeHtml(row.breakout_level)}</td><td>${escapeHtml(row.ltp)}</td><td>${escapeHtml(row.open_hl)}</td><td>${escapeHtml(row.change_pct)}%</td><td>${escapeHtml(row.rsi14 ?? '')}</td><td>${escapeHtml(row.vol_x)}x</td><td><a class="screener-chart-link" href="${screenerTradingViewUrl(row.symbol, '15')}" target="_blank" rel="noopener">Open</a></td>`;
+  tbody.appendChild(tr);
+}
+function screenerAppendOhlRowToDom(row, push = true) {
+  if (push) screenerResults.ohl.push(row);
+  if (!screenerPassesOrbFilters(row)) return;
+  const tbody = screenerEl('screener-ohl-tbody'); if (!tbody) return;
+  const tr = document.createElement('tr'); tr.classList.add(row.action_type === 'Bullish' ? 'screener-bullish-row' : 'screener-bearish-row');
+  tr.innerHTML = `<td>${escapeHtml(row.symbol)}</td><td>${escapeHtml(row.ltp)}</td><td>${escapeHtml(row.change_pct)}%</td><td>${escapeHtml(row.rsi14 ?? '')}</td><td>${escapeHtml(row.open_hl)}</td><td>${escapeHtml(row.action_type)}</td><td><a class="screener-chart-link" href="${screenerTradingViewUrl(row.symbol, 'D')}" target="_blank" rel="noopener">Open</a></td>`;
+  tbody.appendChild(tr);
+}
+function screenerAppendOrb(row) { if (row.result_type === 'ohl') screenerAppendOhlRowToDom(row, true); else screenerAppendOrbRowToDom(row, true); }
+function screenerRedrawOrbTables() {
+  const orbBody = screenerEl('screener-orb-tbody'); if (orbBody) orbBody.innerHTML = '';
+  const ohlBody = screenerEl('screener-ohl-tbody'); if (ohlBody) ohlBody.innerHTML = '';
+  (screenerResults.orb || []).forEach((row) => screenerAppendOrbRowToDom(row, false));
+  (screenerResults.ohl || []).forEach((row) => screenerAppendOhlRowToDom(row, false));
+}
+function screenerPaRowClass(bbPosition) {
+  const pos = String(bbPosition || '').trim();
+  if (['Above Band','Upper Zone','Above Mid','At Upper'].includes(pos)) return 'screener-pa-upper-row';
+  if (['At Middle'].includes(pos)) return 'screener-pa-mid-row';
+  if (['Below Mid','Lower Zone','Below Band','At Lower'].includes(pos)) return 'screener-pa-lower-row';
+  return '';
+}
+function screenerPassesPriceActionFilters(row) {
+  const rsiOp = screenerEl('screener-pa-rsi-op')?.value || 'Any';
+  const rsiVal = Number(screenerEl('screener-pa-rsi-value')?.value || 0);
+  const bbFilter = screenerEl('screener-pa-bb-filter')?.value || 'Any';
+  const chgOp = screenerEl('screener-pa-change-op')?.value || 'Any';
+  const chgVal = Number(screenerEl('screener-pa-change-value')?.value || 0);
+  if (rsiOp === 'Greater Than' && !(Number(row.rsi_val) > rsiVal)) return false;
+  if (rsiOp === 'Less Than' && !(Number(row.rsi_val) < rsiVal)) return false;
+  if (bbFilter !== 'Any' && row.bb_pos !== bbFilter) return false;
+  if (chgOp !== 'Any') {
+    if (chgOp === '>' && !(Number(row.change_pct) > chgVal)) return false;
+    if (chgOp === '<' && !(Number(row.change_pct) < chgVal)) return false;
+    if (chgOp === '>=' && !(Number(row.change_pct) >= chgVal)) return false;
+    if (chgOp === '<=' && !(Number(row.change_pct) <= chgVal)) return false;
+  }
+  return true;
+}
+function screenerAppendPriceAction(row, push = true) {
+  if (push) screenerResults.priceaction.push(row);
+  if (!screenerPassesPriceActionFilters(row)) return;
+  const tbody = screenerEl('screener-pa-tbody'); if (!tbody) return;
+  const tr = document.createElement('tr'); const cls = screenerPaRowClass(row.bb_pos); if (cls) tr.classList.add(cls);
+  tr.innerHTML = `<td>${escapeHtml(row.symbol)}</td><td>${escapeHtml(row.ltp)}</td><td>${escapeHtml(row.change_pct)}%</td><td>${escapeHtml(row.rsi_val ?? '')}</td><td>${escapeHtml(row.bb_pos)}</td><td>${escapeHtml(row.d_close_pct)}%</td><td>${escapeHtml(row.w_close_pct)}%</td><td>${escapeHtml(row.m_close_pct)}%</td><td>${Number(row.volume || 0).toLocaleString()}</td><td>${row.vol10day_high ? 'True' : 'False'}</td><td><a class="screener-chart-link" href="${screenerTradingViewUrl(row.symbol, '60')}" target="_blank" rel="noopener">Open</a></td>`;
+  tbody.appendChild(tr);
+}
+function screenerRedrawPriceActionTable() {
+  const tbody = screenerEl('screener-pa-tbody'); if (tbody) tbody.innerHTML = '';
+  (screenerResults.priceaction || []).forEach((row) => screenerAppendPriceAction(row, false));
+}
+function screenerAppendResult(scanner, row) {
+  if (scanner === 'ema') return screenerAppendEma(row);
+  if (scanner === 'volume') return screenerAppendVolume(row);
+  if (scanner === 'orb') return screenerAppendOrb(row);
+  if (scanner === 'priceaction') return screenerAppendPriceAction(row, true);
+}
+function screenerSwitchOrbSubtab(button) {
+  document.querySelectorAll('.screener-orb-sub-tab').forEach(btn => btn.classList.remove('active'));
+  document.querySelectorAll('.screener-orb-sub-pane').forEach(pane => pane.classList.remove('active'));
+  button.classList.add('active');
+  const pane = screenerEl(button.dataset.orbSubtab); if (pane) pane.classList.add('active');
+}
+function screenerWireAdvancedFilters() {
+  ['screener-orb-signal-filter','screener-orb-openhl-filter','screener-orb-rsi-op','screener-orb-rsi-value','screener-orb-volx-op','screener-orb-volx-value'].forEach((id) => { const el = screenerEl(id); if (el && !el.dataset.wired) { el.dataset.wired='1'; el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', screenerRedrawOrbTables); } });
+  ['screener-pa-rsi-op','screener-pa-rsi-value','screener-pa-bb-filter','screener-pa-change-op','screener-pa-change-value'].forEach((id) => { const el = screenerEl(id); if (el && !el.dataset.wired) { el.dataset.wired='1'; el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', screenerRedrawPriceActionTable); } });
+}
 async function screenerRunScan(scanner) {
   if (screenerRunning) return;
   const sheet = screenerEl('screener-sheet-select')?.value;
   if (!sheet) { screenerStatus('Select a sheet first.'); return; }
-  const config = scanner === 'ema' ? screenerEmaConfig() : screenerVolumeConfig();
+  const config = screenerConfig(scanner);
   screenerClearResults(scanner); screenerSetProgress({percent:0, symbol:'-', scanned:0, total:0, matches:0}); screenerStatus(`Starting ${scanner.toUpperCase()} scan on ${sheet}…`);
   screenerAbortController = new AbortController(); screenerSetControls(true);
   try {
@@ -3501,7 +3747,7 @@ async function screenerRunScan(scanner) {
         const event = JSON.parse(line);
         if (event.type === 'start') { screenerSetProgress(event); screenerStatus(`Scanning ${event.total} symbols from ${event.sheet}…`); }
         else if (event.type === 'progress') { screenerSetProgress(event); screenerStatus(event.message || `Scanning ${event.symbol}…`); }
-        else if (event.type === 'result') { scanner === 'ema' ? screenerAppendEma(event.row) : screenerAppendVolume(event.row); screenerSetProgress(event); screenerStatus(`Match found: ${event.row.symbol}. Continuing scan…`); }
+        else if (event.type === 'result') { screenerAppendResult(scanner, event.row); screenerSetProgress(event); screenerStatus(`Match found: ${event.row.symbol}. Continuing scan…`); }
         else if (event.type === 'done') { screenerSetProgress(event); const errText = event.errors?.length ? ` ${event.errors.length} symbol errors captured.` : ''; screenerStatus(`${event.message}${errText}`); setLastUpdated('Screener'); }
       }
     }
@@ -3511,7 +3757,7 @@ async function screenerRunScan(scanner) {
   } finally { screenerAbortController = null; screenerSetControls(false); }
 }
 function screenerExportCsv() {
-  const rows = screenerResults[screenerActive] || [];
+  const rows = screenerActive === 'orb' ? [...(screenerResults.orb || []), ...(screenerResults.ohl || [])] : (screenerResults[screenerActive] || []);
   if (!rows.length) { screenerStatus('No active results to export.'); return; }
   const headers = Object.keys(rows[0]);
   const csv = [headers.join(',')].concat(rows.map(row => headers.map(h => JSON.stringify(row[h] ?? '')).join(','))).join('\n');
