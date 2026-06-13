@@ -1,3 +1,22 @@
 {
-  "e70ba213-ffc7-44df-9129-afdb478f3365": []
+  "409374c8-a0b7-46a7-a2e0-63e91a6270cf": {
+    "Default": [
+      {
+        "symbol": "RELIANCE",
+        "name": "Reliance Industries Limited",
+        "industry": "Oil Gas & Consumable Fuels",
+        "added": "2026-06-13",
+        "group_name": "Default"
+      }
+    ],
+    "trend": [
+      {
+        "symbol": "ITC",
+        "name": "ITC Limited",
+        "industry": "Fast Moving Consumer Goods",
+        "added": "2026-06-13",
+        "group_name": "trend"
+      }
+    ]
+  }
 }

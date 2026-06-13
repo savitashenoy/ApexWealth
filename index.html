@@ -938,6 +938,50 @@ body.dark .watchlist-heatmap-table .hm-name { color: var(--text-secondary); }
   .market-ticker { padding: 7px 14px; }
   .sidebar-tag { display: none; }
 }
+
+
+/* ── SCREENER PAGE ── */
+.screener-hero { display:grid; grid-template-columns: 1.1fr .9fr; gap:14px; margin-bottom:14px; }
+.screener-card { background: var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; box-shadow:0 12px 28px var(--shadow); }
+.screener-title { font-weight:900; font-size:1rem; margin-bottom:6px; display:flex; align-items:center; gap:8px; }
+.screener-sub { color:var(--dim); font-size:.78rem; line-height:1.5; }
+.screener-controls { display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; margin-top:14px; align-items:end; }
+.screener-controls label { display:flex; flex-direction:column; gap:5px; color:var(--dim); font-size:.66rem; font-weight:800; text-transform:uppercase; letter-spacing:.9px; }
+.screener-controls input, .screener-controls select { background: var(--bg); border:1px solid var(--border2); border-radius:8px; padding:9px 10px; color:var(--text); font-family:'JetBrains Mono', monospace; font-size:.78rem; outline:none; }
+.screener-controls select, .screener-controls select option { color:#000 !important; }
+.screener-tabs .screener-tab-btn.active { color:#000 !important; }
+.screener-top-controls { grid-template-columns: minmax(220px, 320px) auto; justify-content:start; }
+.screener-volume-conditions { grid-template-columns: repeat(6, minmax(110px, 1fr)); gap:6px; }
+.screener-volume-conditions label { font-size:.56rem; letter-spacing:.45px; gap:3px; }
+.screener-volume-conditions input, .screener-volume-conditions select { padding:6px 7px; font-size:.66rem; border-radius:7px; min-width:0; }
+.screener-ema-conditions { grid-template-columns: repeat(5, minmax(105px, 1fr)); gap:6px; }
+.screener-ema-conditions label { font-size:.56rem; letter-spacing:.45px; gap:3px; }
+.screener-ema-conditions input, .screener-ema-conditions select { padding:6px 7px; font-size:.66rem; border-radius:7px; min-width:0; }
+.screener-progress-card { display:flex; flex-direction:column; gap:10px; justify-content:center; }
+.screener-status-line { color:var(--text-secondary); font-family:'JetBrains Mono', monospace; font-size:.76rem; }
+.screener-progress-track { height:10px; background:var(--bg); border:1px solid var(--border); border-radius:999px; overflow:hidden; }
+.screener-progress-fill { height:100%; width:0%; background:linear-gradient(90deg, var(--accent), var(--green)); transition:width .2s ease; }
+.screener-progress-meta { display:flex; justify-content:space-between; gap:10px; color:var(--dim); font-family:'JetBrains Mono', monospace; font-size:.72rem; }
+.screener-tabs { display:flex; gap:8px; margin-bottom:12px; }
+.screener-tab-btn { border:1px solid var(--border); background:var(--card); color:var(--dim); padding:10px 14px; border-radius:10px; font-weight:900; cursor:pointer; }
+.screener-tab-btn.active, .screener-tab-btn:hover { background:var(--accent); border-color:var(--accent); color:#fff; }
+.screener-panel { display:none; }
+.screener-panel.active { display:block; }
+.screener-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:10px; flex-wrap:wrap; }
+.screener-table-wrap { margin-top:12px; max-height:480px; overflow:auto; border:1px solid var(--border); border-radius:10px; }
+.screener-table-wrap table { width:100%; border-collapse:separate; border-spacing:0; }
+.screener-table-wrap th { position:sticky; top:0; z-index:2; background:var(--card2); }
+.screener-table-wrap th, .screener-table-wrap td { padding:9px 10px; border-bottom:1px solid var(--border); white-space:nowrap; font-size:.78rem; }
+.screener-chart-link { color:var(--accent); font-weight:900; text-decoration:none; }
+.screener-ema-strong-row td { background:#6FFF6F !important; color:#083b12 !important; font-weight:900; }
+.screener-bb-upper-row td { background:#00F700 !important; color:#062b06 !important; font-weight:900; }
+.screener-bb-mid-row td { background:#00FFFF !important; color:#063334 !important; font-weight:900; }
+.screener-bb-lower-row td { background:#FF5555 !important; color:#fff !important; font-weight:900; }
+body.light .screener-card, body.light .screener-tab-btn { background:#f5f2eb; }
+@media (max-width: 1180px) { .screener-volume-conditions, .screener-ema-conditions { grid-template-columns:repeat(3,1fr); } }
+@media (max-width: 980px) { .screener-hero { grid-template-columns:1fr; } .screener-controls { grid-template-columns:repeat(2,1fr); } .screener-top-controls { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 620px) { .screener-controls, .screener-top-controls, .screener-volume-conditions, .screener-ema-conditions { grid-template-columns:1fr; } }
+
 </style>
 </head>
 <body class="light">
@@ -1031,6 +1075,7 @@ body.dark .watchlist-heatmap-table .hm-name { color: var(--text-secondary); }
       <button class="nav-page-btn" onclick="showPage('watchlist')"><i class="fa fa-star"></i> Watchlist</button>
       <button class="nav-page-btn" onclick="showPage('analysis')"><i class="fa fa-chart-line"></i> Analysis</button>
       <button class="nav-page-btn" onclick="showPage('markets')"><i class="fa fa-globe"></i> Markets</button>
+      <button class="nav-page-btn" onclick="showPage('screener')"><i class="fa fa-filter"></i> Screener</button>
     </div>
     <div class="nav-user">
       <div class="nav-avatar" id="nav-avatar">U</div>
@@ -1082,6 +1127,14 @@ body.dark .watchlist-heatmap-table .hm-name { color: var(--text-secondary); }
           <div class="chart-title allocation-title-chip">Portfolio Allocation by Percentage</div>
           <div class="chart-container allocation-donut-container"><canvas id="dash-allocation-chart"></canvas></div>
         </div>
+        <div class="chart-card">
+          <div class="chart-title">By Industry</div>
+          <div class="chart-container"><canvas id="alloc-industry-chart"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-title">P&L by Stock (₹)</div>
+          <div class="chart-container"><canvas id="alloc-pnl-chart"></canvas></div>
+        </div>
       </div>
     </div>
 
@@ -1099,7 +1152,6 @@ body.dark .watchlist-heatmap-table .hm-name { color: var(--text-secondary); }
 
       <div class="tabs-bar">
         <button class="tab-btn active" onclick="switchPortTab('holdings')">Holdings</button>
-        <button class="tab-btn" onclick="switchPortTab('allocation')">Asset Allocation</button>
         <button class="tab-btn" onclick="switchPortTab('performance')">Performance Report</button>
       </div>
 
@@ -1148,28 +1200,6 @@ body.dark .watchlist-heatmap-table .hm-name { color: var(--text-secondary); }
               <tr><td colspan="11"><div class="loading-overlay"><div class="spinner"></div> Loading…</div></td></tr>
             </tbody>
           </table>
-        </div>
-      </div>
-
-      <!-- ASSET ALLOCATION TAB -->
-      <div class="tab-content" id="tab-allocation">
-        <div class="charts-grid">
-          <div class="chart-card">
-            <div class="chart-title">By Industry</div>
-            <div class="chart-container"><canvas id="alloc-industry-chart"></canvas></div>
-          </div>
-          <div class="chart-card">
-            <div class="chart-title">By Stock (Current Value)</div>
-            <div class="chart-container"><canvas id="alloc-stock-chart"></canvas></div>
-          </div>
-          <div class="chart-card">
-            <div class="chart-title">Invested vs Current Value by Stock</div>
-            <div class="chart-container"><canvas id="alloc-bar-chart"></canvas></div>
-          </div>
-          <div class="chart-card">
-            <div class="chart-title">P&L by Stock (₹)</div>
-            <div class="chart-container"><canvas id="alloc-pnl-chart"></canvas></div>
-          </div>
         </div>
       </div>
 
@@ -1383,6 +1413,73 @@ body.dark .watchlist-heatmap-table .hm-name { color: var(--text-secondary); }
       </div>
     </div>
 
+
+
+    <!-- SCREENER PAGE -->
+    <div class="page" id="page-screener">
+      <div class="page-title"><i class="fa fa-filter"></i> Screener</div>
+      <div class="screener-hero">
+        <div class="screener-card">
+          <div class="screener-title"><i class="fa fa-radar"></i> Integrated Stock Scanner</div>
+          <div class="screener-sub">Run EMA + RSI Bullish Reversal and Volume & Price Breakout scans from the bundled Excel sheet source. Results stream live with progress updates.</div>
+          <div class="screener-controls screener-top-controls">
+            <label>Sheet Source<select id="screener-sheet-select"></select></label>
+            <button class="btn btn-outline" onclick="screenerLoadSymbols()"><i class="fa fa-list"></i> Load Symbols</button>
+          </div>
+        </div>
+        <div class="screener-card screener-progress-card">
+          <div class="screener-status-line" id="screener-status">Loading scanner sheets…</div>
+          <div class="screener-progress-track"><div class="screener-progress-fill" id="screener-progress-fill"></div></div>
+          <div class="screener-progress-meta"><span id="screener-progress-text">0%</span><span id="screener-counts">Scanned: 0 / 0 | Matches: 0</span></div>
+        </div>
+      </div>
+
+      <div class="screener-tabs">
+        <button class="screener-tab-btn active" data-screener-tab="ema" onclick="screenerSwitchTab('ema', this)">EMA + RSI Bullish Reversal</button>
+        <button class="screener-tab-btn" data-screener-tab="volume" onclick="screenerSwitchTab('volume', this)">Volume & Price Breakout</button>
+      </div>
+
+      <div class="screener-panel active" id="screener-panel-ema">
+        <div class="screener-card">
+          <div class="screener-title">EMA + RSI Bullish Reversal Scanner</div>
+          <div class="screener-controls screener-ema-conditions">
+            <label>Timeframe<select id="screener-ema-timeframe"><option>Weekly</option><option>Daily</option><option>60min</option></select></label>
+            <label>Lookback Days<input id="screener-ema-lookback" type="number" value="20" min="1"></label>
+            <label>EMA 1<input id="screener-ema1" type="number" value="9" min="1"></label>
+            <label>EMA 2<input id="screener-ema2" type="number" value="18" min="1"></label>
+            <label>EMA 3<input id="screener-ema3" type="number" value="27" min="1"></label>
+          </div>
+          <div class="screener-actions">
+            <button class="btn btn-primary screener-run-btn" onclick="screenerRunScan('ema')"><i class="fa fa-play"></i> Run Scan</button>
+            <button class="btn btn-outline screener-stop-btn" onclick="screenerStopScan()" disabled><i class="fa fa-stop"></i> Stop Scan</button>
+            <button class="btn btn-outline" onclick="screenerClearResults('ema')"><i class="fa fa-trash"></i> Clear Results</button>
+          </div>
+          <div class="screener-table-wrap"><table><thead><tr><th>Symbol</th><th>Current Price</th><th>RSI 14</th><th>EMA1 Diff %</th><th>EMA2 Diff %</th><th>EMA3 Diff %</th><th>Chart</th></tr></thead><tbody id="screener-ema-tbody"></tbody></table></div>
+        </div>
+      </div>
+
+      <div class="screener-panel" id="screener-panel-volume">
+        <div class="screener-card">
+          <div class="screener-title">Volume & Price Breakout Scanner</div>
+          <div class="screener-controls screener-volume-conditions">
+            <label>Interval<select id="screener-vol-interval"><option value="15m">15m → 1h</option><option value="1h">1h</option><option value="1d">1D</option></select></label>
+            <label>Volume Ratio ≥<input id="screener-vol-threshold" type="number" value="2.0" step="0.1"></label>
+            <label>Price Change % ≥<input id="screener-price-threshold" type="number" value="3.0" step="0.1"></label>
+            <label>Minimum Price ≥<input id="screener-min-price" type="number" value="100" step="1"></label>
+            <label>RSI &gt;<input id="screener-rsi-threshold" type="number" value="55" step="1"></label>
+            <label>RSI Length<input id="screener-rsi-length" type="number" value="14" min="2"></label>
+          </div>
+          <div class="screener-actions">
+            <button class="btn btn-primary screener-run-btn" onclick="screenerRunScan('volume')"><i class="fa fa-play"></i> Run Scan</button>
+            <button class="btn btn-outline screener-stop-btn" onclick="screenerStopScan()" disabled><i class="fa fa-stop"></i> Stop Scan</button>
+            <button class="btn btn-outline" onclick="screenerClearResults('volume')"><i class="fa fa-trash"></i> Clear Results</button>
+          </div>
+          <div class="screener-table-wrap"><table><thead><tr><th>Symbol</th><th>Prev 5 Period Vol</th><th>Curr 5 Period Vol</th><th>Current Price</th><th>Vol Ratio</th><th>Price Change %</th><th>RSI</th><th>BB Position</th><th>Chart</th></tr></thead><tbody id="screener-volume-tbody"></tbody></table></div>
+        </div>
+      </div>
+      <div class="screener-actions" style="justify-content:flex-start;margin-top:14px"><button class="btn btn-outline" onclick="screenerExportCsv()"><i class="fa fa-file-csv"></i> Export Active Results CSV</button></div>
+    </div>
+
     </div><!-- /.main -->
   </div><!-- /.app-shell -->
 </div><!-- /#app -->
@@ -1561,7 +1658,6 @@ function refreshVisibleCharts() {
   const activePage = document.querySelector('.page.active')?.id?.replace('page-', '');
   if (activePage === 'dashboard' && holdingsData.length) renderDashCharts(holdingsData);
   if (activePage === 'portfolio') {
-    if (document.getElementById('tab-allocation')?.classList.contains('active')) renderAllocationCharts();
     if (document.getElementById('tab-performance')?.classList.contains('active')) loadTrades();
   }
   if (activePage === 'analysis' && analysisTicker) {
@@ -1769,7 +1865,7 @@ function doLogout() {
 async function showPage(name) {
   document.querySelectorAll('.nav-page-btn').forEach((b,i) => {
     b.classList.remove('active');
-    if (['dashboard','portfolio','watchlist','analysis','markets'][i] === name) b.classList.add('active');
+    if (['dashboard','portfolio','watchlist','analysis','markets','screener'][i] === name) b.classList.add('active');
   });
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.getElementById(`page-${name}`).classList.add('active');
@@ -1781,6 +1877,7 @@ async function loadPage(name) {
   else if (name === 'portfolio') await loadPortfolio();
   else if (name === 'watchlist') await loadWatchlist();
   else if (name === 'markets') await loadMarkets();
+  else if (name === 'screener') await screenerInit();
   else if (name === 'analysis') { if (analysisTicker) await loadAnalysisSequence(); }
 }
 
@@ -1836,7 +1933,7 @@ async function loadDashboard() {
   if (!n) {
     if (empty) empty.classList.add('show');
     if (charts) charts.classList.add('is-hidden');
-    ['dashBarChart','dashAllocationChart'].forEach(destroyChartSafe);
+    ['dashBarChart','dashAllocationChart','allocIndustryChart','allocPnlChart'].forEach(destroyChartSafe);
     setLastUpdated('Dashboard');
     return;
   }
@@ -1889,6 +1986,39 @@ function renderDashCharts(holdings) {
         }]
       },
       options: dashboardAllocationDoughnutOpts(totalInvested)
+    });
+  }
+
+  // By Industry chart moved from Portfolio → Asset Allocation to Dashboard
+  const industryMap = {};
+  holdings.forEach(h => {
+    const key = h.industry || h.sector || 'Unknown';
+    industryMap[key] = (industryMap[key] || 0) + Number(h.curr_value || 0);
+  });
+  const industryCtx = document.getElementById('alloc-industry-chart')?.getContext('2d');
+  if (industryCtx) {
+    if (allocIndustryChart) allocIndustryChart.destroy();
+    allocIndustryChart = new Chart(industryCtx, {
+      type: 'doughnut',
+      data: { labels: Object.keys(industryMap), datasets: [{ data: Object.values(industryMap), backgroundColor: COLORS, borderColor: currentThemeColors().donutBorder, borderWidth: 2 }] },
+      options: doughnutOpts()
+    });
+  }
+
+  // P&L by Stock chart moved from Portfolio → Asset Allocation to Dashboard
+  const pnlCtx = document.getElementById('alloc-pnl-chart')?.getContext('2d');
+  const pnls = holdings.map(h => Number(h.pnl || 0));
+  if (pnlCtx) {
+    if (allocPnlChart) allocPnlChart.destroy();
+    allocPnlChart = new Chart(pnlCtx, {
+      type: 'bar',
+      data: { labels, datasets: [{
+        label: 'P&L (₹)', data: pnls,
+        backgroundColor: pnls.map(v => v >= 0 ? 'rgba(0,200,150,0.6)' : 'rgba(255,77,109,0.6)'),
+        borderColor: pnls.map(v => v >= 0 ? '#00c896' : '#ff4d6d'),
+        borderWidth: 1
+      }] },
+      options: chartOpts('₹')
     });
   }
 }
@@ -2104,11 +2234,10 @@ async function confirmEdit() {
 function switchPortTab(tab) {
   document.querySelectorAll('.tabs-bar .tab-btn').forEach((b,i) => {
     b.classList.remove('active');
-    if (['holdings','allocation','performance'][i] === tab) b.classList.add('active');
+    if (['holdings','performance'][i] === tab) b.classList.add('active');
   });
   document.querySelectorAll('#page-portfolio .tab-content').forEach(t => t.classList.remove('active'));
   document.getElementById(`tab-${tab}`).classList.add('active');
-  if (tab === 'allocation') renderAllocationCharts();
   if (tab === 'performance') loadTrades();
 }
 
@@ -2119,32 +2248,34 @@ function renderAllocationCharts() {
   // Industry donut
   const sMap = {};
   h.forEach(x => { const s = x.industry || x.sector || 'Unknown'; sMap[s] = (sMap[s]||0) + x.curr_value; });
-  const ctx1 = document.getElementById('alloc-industry-chart').getContext('2d');
-  if (allocIndustryChart) allocIndustryChart.destroy();
-  allocIndustryChart = new Chart(ctx1, {type:'doughnut', data:{labels:Object.keys(sMap),datasets:[{data:Object.values(sMap),backgroundColor:COLORS,borderColor:currentThemeColors().donutBorder,borderWidth:2}]}, options:doughnutOpts()});
+  const ctx1 = document.getElementById('alloc-industry-chart')?.getContext('2d');
+  if (ctx1) {
+    if (allocIndustryChart) allocIndustryChart.destroy();
+    allocIndustryChart = new Chart(ctx1, {type:'doughnut', data:{labels:Object.keys(sMap),datasets:[{data:Object.values(sMap),backgroundColor:COLORS,borderColor:currentThemeColors().donutBorder,borderWidth:2}]}, options:doughnutOpts()});
+  }
 
   // Stock donut
-  const ctx2 = document.getElementById('alloc-stock-chart').getContext('2d');
-  if (allocStockChart) allocStockChart.destroy();
-  allocStockChart = new Chart(ctx2, {type:'doughnut', data:{labels:h.map(x=>x.symbol),datasets:[{data:h.map(x=>x.curr_value),backgroundColor:COLORS,borderColor:currentThemeColors().donutBorder,borderWidth:2}]}, options:doughnutOpts()});
+  const ctx2 = document.getElementById('alloc-stock-chart')?.getContext('2d');
+  if (ctx2) { if (allocStockChart) allocStockChart.destroy();
+  allocStockChart = new Chart(ctx2, {type:'doughnut', data:{labels:h.map(x=>x.symbol),datasets:[{data:h.map(x=>x.curr_value),backgroundColor:COLORS,borderColor:currentThemeColors().donutBorder,borderWidth:2}]}, options:doughnutOpts()}); }
 
   // Bar invested vs curr
-  const ctx3 = document.getElementById('alloc-bar-chart').getContext('2d');
-  if (allocBarChart) allocBarChart.destroy();
+  const ctx3 = document.getElementById('alloc-bar-chart')?.getContext('2d');
+  if (ctx3) { if (allocBarChart) allocBarChart.destroy();
   allocBarChart = new Chart(ctx3, {type:'bar',data:{labels:h.map(x=>x.symbol),datasets:[
     {label:'Invested',data:h.map(x=>x.invested),backgroundColor:'rgba(80,140,255,0.5)',borderColor:'#508cff',borderWidth:1},
     {label:'Current Value',data:h.map(x=>x.curr_value),backgroundColor:'rgba(0,200,150,0.5)',borderColor:'#00c896',borderWidth:1}
-  ]},options:chartOpts('₹')});
+  ]},options:chartOpts('₹')}); }
 
   // P&L bar
   const pnls = h.map(x => x.pnl);
-  const ctx4 = document.getElementById('alloc-pnl-chart').getContext('2d');
-  if (allocPnlChart) allocPnlChart.destroy();
+  const ctx4 = document.getElementById('alloc-pnl-chart')?.getContext('2d');
+  if (ctx4) { if (allocPnlChart) allocPnlChart.destroy();
   allocPnlChart = new Chart(ctx4, {type:'bar',data:{labels:h.map(x=>x.symbol),datasets:[{
     label:'P&L (₹)', data:pnls,
     backgroundColor:pnls.map(v => v>=0?'rgba(0,200,150,0.6)':'rgba(255,77,109,0.6)'),
     borderColor:pnls.map(v => v>=0?'#00c896':'#ff4d6d'),borderWidth:1
-  }]},options:chartOpts('₹')});
+  }]},options:chartOpts('₹')}); }
 }
 
 async function loadTrades() {
@@ -3234,6 +3365,161 @@ function dashboardAllocationDoughnutOpts(totalInvested) {
     }
   };
 }
+
+
+
+// ──────────────────────────────────────────────────────────────────────────────
+// SCREENER
+// ──────────────────────────────────────────────────────────────────────────────
+let screenerActive = 'ema';
+let screenerResults = { ema: [], volume: [] };
+let screenerRunning = false;
+let screenerAbortController = null;
+let screenerInitialized = false;
+
+function screenerEl(id) { return document.getElementById(id); }
+function screenerStatus(message) { const el = screenerEl('screener-status'); if (el) el.textContent = message; }
+function screenerSetProgress({percent=0, symbol='-', scanned=0, total=0, matches=0} = {}) {
+  const pct = Math.max(0, Math.min(100, Number(percent) || 0));
+  const fill = screenerEl('screener-progress-fill'); if (fill) fill.style.width = `${pct}%`;
+  const text = screenerEl('screener-progress-text'); if (text) text.textContent = `${pct.toFixed(pct % 1 ? 1 : 0)}%`;
+  const ticker = screenerEl('screener-current-ticker'); if (ticker) ticker.value = symbol || '-';
+  const counts = screenerEl('screener-counts'); if (counts) counts.textContent = `Scanned: ${scanned || 0} / ${total || 0} | Matches: ${matches || 0}`;
+}
+function screenerTradingViewUrl(symbol, interval) {
+  const clean = String(symbol || '').replace(/\.NS$/i, '').replace(/\.BO$/i, '').replace(/^NSE:/i, '');
+  return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(clean)}&interval=${interval}`;
+}
+async function screenerInit() {
+  if (screenerInitialized) return;
+  screenerInitialized = true;
+  await screenerLoadSheets();
+}
+async function screenerLoadSheets() {
+  try {
+    screenerStatus('Loading scanner sheets…');
+    const res = await fetch(`${API}/screener/sheets`, {cache:'no-store'});
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Unable to load sheets');
+    const select = screenerEl('screener-sheet-select');
+    if (!select) return;
+    select.innerHTML = '';
+    (data.sheets || []).forEach((name) => {
+      const opt = document.createElement('option'); opt.value = name; opt.textContent = name; select.appendChild(opt);
+    });
+    select.onchange = screenerLoadSymbols;
+    if ((data.sheets || []).length) await screenerLoadSymbols();
+    else screenerStatus('No sheets found in ScannerData.xlsx.');
+  } catch (err) { screenerStatus(`Failed to load sheet names: ${err.message}`); }
+}
+async function screenerLoadSymbols() {
+  const sheet = screenerEl('screener-sheet-select')?.value;
+  if (!sheet) return;
+  try {
+    screenerStatus(`Loading symbols from ${sheet}…`);
+    const res = await fetch(`${API}/screener/symbols?sheet=${encodeURIComponent(sheet)}`, {cache:'no-store'});
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Unable to load symbols');
+    const count = screenerEl('screener-symbol-count'); if (count) count.value = data.count || 0;
+    screenerSetProgress({percent:0, symbol:'-', scanned:0, total:data.count || 0, matches:0});
+    screenerStatus(`Loaded ${data.count || 0} symbols from ${sheet}.`);
+  } catch (err) { screenerStatus(`Error: ${err.message}`); }
+}
+function screenerSwitchTab(name, btn) {
+  screenerActive = name;
+  document.querySelectorAll('.screener-tab-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  document.querySelectorAll('.screener-panel').forEach(p => p.classList.remove('active'));
+  const panel = screenerEl(`screener-panel-${name}`); if (panel) panel.classList.add('active');
+  screenerStatus(`Active scanner: ${name.toUpperCase()}.`);
+}
+function screenerEmaConfig() {
+  return { timeframe: screenerEl('screener-ema-timeframe').value, lookback_days: Number(screenerEl('screener-ema-lookback').value || 20), ema1: Number(screenerEl('screener-ema1').value || 9), ema2: Number(screenerEl('screener-ema2').value || 18), ema3: Number(screenerEl('screener-ema3').value || 27) };
+}
+function screenerVolumeConfig() {
+  return { interval: screenerEl('screener-vol-interval').value, volume_threshold: Number(screenerEl('screener-vol-threshold').value || 2), price_threshold: Number(screenerEl('screener-price-threshold').value || 3), min_price: Number(screenerEl('screener-min-price').value || 100), rsi_threshold: Number(screenerEl('screener-rsi-threshold').value || 55), rsi_length: Number(screenerEl('screener-rsi-length').value || 14) };
+}
+function screenerSetControls(running) {
+  screenerRunning = running;
+  document.querySelectorAll('.screener-run-btn').forEach(btn => btn.disabled = running);
+  document.querySelectorAll('.screener-stop-btn').forEach(btn => btn.disabled = !running);
+  const select = screenerEl('screener-sheet-select'); if (select) select.disabled = running;
+}
+function screenerStopScan() {
+  if (!screenerRunning || !screenerAbortController) return;
+  screenerAbortController.abort(); screenerStatus('Stopping scan…');
+}
+function screenerClearResults(scanner = screenerActive) {
+  screenerResults[scanner] = [];
+  const tbody = screenerEl(scanner === 'ema' ? 'screener-ema-tbody' : 'screener-volume-tbody');
+  if (tbody) tbody.innerHTML = '';
+  if (!screenerRunning) { screenerSetProgress({percent:0, symbol:'-', scanned:0, total:0, matches:0}); screenerStatus(`${scanner.toUpperCase()} results cleared.`); }
+}
+function screenerNumberValue(value) { const n = Number(String(value ?? '').replace('%','')); return Number.isFinite(n) ? n : 0; }
+function screenerAppendEma(row) {
+  screenerResults.ema.push(row);
+  const tbody = screenerEl('screener-ema-tbody'); if (!tbody) return;
+  const tr = document.createElement('tr');
+  const interval = screenerEl('screener-ema-timeframe').value === 'Weekly' ? 'W' : (screenerEl('screener-ema-timeframe').value === 'Daily' ? 'D' : '60');
+  if (screenerNumberValue(row.ema1_diff_pct) > 3 && screenerNumberValue(row.ema2_diff_pct) > 3 && screenerNumberValue(row.ema3_diff_pct) > 3) tr.classList.add('screener-ema-strong-row');
+  tr.innerHTML = `<td>${escapeHtml(row.symbol)}</td><td>${escapeHtml(row.current_price)}</td><td>${escapeHtml(row.rsi14)}</td><td>${escapeHtml(row.ema1_diff_pct)}%</td><td>${escapeHtml(row.ema2_diff_pct)}%</td><td>${escapeHtml(row.ema3_diff_pct)}%</td><td><a class="screener-chart-link" href="${screenerTradingViewUrl(row.symbol, interval)}" target="_blank" rel="noopener">Open</a></td>`;
+  tbody.appendChild(tr);
+}
+function screenerVolumeRowClass(pos) {
+  const p = String(pos || '').trim();
+  if (['Upper Band','Above Band','At Upper'].includes(p)) return 'screener-bb-upper-row';
+  if (['Above Mid','Mid Band','Below Mid','At Middle'].includes(p)) return 'screener-bb-mid-row';
+  if (['Lower Band','Below Band','At Lower'].includes(p)) return 'screener-bb-lower-row';
+  return '';
+}
+function screenerAppendVolume(row) {
+  screenerResults.volume.push(row);
+  const tbody = screenerEl('screener-volume-tbody'); if (!tbody) return;
+  const tr = document.createElement('tr');
+  const rowClass = screenerVolumeRowClass(row.bb_position); if (rowClass) tr.classList.add(rowClass);
+  const interval = screenerEl('screener-vol-interval').value === '1d' ? 'D' : '60';
+  tr.innerHTML = `<td>${escapeHtml(row.symbol)}</td><td>${Number(row.prev_5_vol || 0).toLocaleString()}</td><td>${Number(row.curr_5_vol || 0).toLocaleString()}</td><td>${escapeHtml(row.current_price)}</td><td>${escapeHtml(row.volume_ratio)}</td><td>${escapeHtml(row.price_change_pct)}%</td><td>${escapeHtml(row.rsi)}</td><td>${escapeHtml(row.bb_position)}</td><td><a class="screener-chart-link" href="${screenerTradingViewUrl(row.symbol, interval)}" target="_blank" rel="noopener">Open</a></td>`;
+  tbody.appendChild(tr);
+}
+async function screenerRunScan(scanner) {
+  if (screenerRunning) return;
+  const sheet = screenerEl('screener-sheet-select')?.value;
+  if (!sheet) { screenerStatus('Select a sheet first.'); return; }
+  const config = scanner === 'ema' ? screenerEmaConfig() : screenerVolumeConfig();
+  screenerClearResults(scanner); screenerSetProgress({percent:0, symbol:'-', scanned:0, total:0, matches:0}); screenerStatus(`Starting ${scanner.toUpperCase()} scan on ${sheet}…`);
+  screenerAbortController = new AbortController(); screenerSetControls(true);
+  try {
+    const res = await fetch(`${API}/screener/scan_stream/${scanner}`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({sheet, config}), signal:screenerAbortController.signal });
+    if (!res.ok) { let data = {}; try { data = await res.json(); } catch(_) {} throw new Error(data.error || 'Scan failed'); }
+    const reader = res.body.getReader(); const decoder = new TextDecoder(); let buffer = '';
+    while (true) {
+      const {value, done} = await reader.read(); if (done) break;
+      buffer += decoder.decode(value, {stream:true});
+      const lines = buffer.split('\n'); buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const event = JSON.parse(line);
+        if (event.type === 'start') { screenerSetProgress(event); screenerStatus(`Scanning ${event.total} symbols from ${event.sheet}…`); }
+        else if (event.type === 'progress') { screenerSetProgress(event); screenerStatus(event.message || `Scanning ${event.symbol}…`); }
+        else if (event.type === 'result') { scanner === 'ema' ? screenerAppendEma(event.row) : screenerAppendVolume(event.row); screenerSetProgress(event); screenerStatus(`Match found: ${event.row.symbol}. Continuing scan…`); }
+        else if (event.type === 'done') { screenerSetProgress(event); const errText = event.errors?.length ? ` ${event.errors.length} symbol errors captured.` : ''; screenerStatus(`${event.message}${errText}`); setLastUpdated('Screener'); }
+      }
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') screenerStatus('Scan stopped by user. Existing results are kept.');
+    else screenerStatus(`Error: ${err.message}`);
+  } finally { screenerAbortController = null; screenerSetControls(false); }
+}
+function screenerExportCsv() {
+  const rows = screenerResults[screenerActive] || [];
+  if (!rows.length) { screenerStatus('No active results to export.'); return; }
+  const headers = Object.keys(rows[0]);
+  const csv = [headers.join(',')].concat(rows.map(row => headers.map(h => JSON.stringify(row[h] ?? '')).join(','))).join('\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob); const a = document.createElement('a');
+  a.href = url; a.download = `${screenerActive}_scanner_results.csv`; a.click(); URL.revokeObjectURL(url);
+}
+
 
 // ──────────────────────────────────────────────────────────────────────────────
 // UTILS

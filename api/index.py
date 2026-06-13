@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, Response
 from flask_cors import CORS
 import json, os, hashlib, uuid, time
 from datetime import datetime, date
@@ -2194,6 +2194,240 @@ def admin_delete_user(user_id):
         return jsonify({'ok': True, 'message': 'User deleted'})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SCREENER / INTEGRATED STOCK SCANNER
+# ──────────────────────────────────────────────────────────────────────────────
+SCREENER_DATA_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data', 'ScannerData.xlsx'))
+
+def screener_normalize_symbol(symbol):
+    s = str(symbol or '').strip().upper()
+    if not s or s in {'NAN', 'NONE'}:
+        return ''
+    if s.startswith('NSE:'):
+        s = s.replace('NSE:', '', 1)
+    if '.' not in s:
+        s = f'{s}.NS'
+    return s
+
+def screener_sheet_names():
+    if not os.path.exists(SCREENER_DATA_FILE):
+        return []
+    try:
+        return pd.ExcelFile(SCREENER_DATA_FILE).sheet_names
+    except Exception:
+        return []
+
+def screener_load_symbols(sheet_name):
+    sheets = screener_sheet_names()
+    if sheet_name not in sheets:
+        raise ValueError(f"Sheet '{sheet_name}' not found")
+    df = pd.read_excel(SCREENER_DATA_FILE, sheet_name=sheet_name, header=None, dtype=str)
+    raw_values = df.values.ravel().tolist()
+    symbols, seen = [], set()
+    for value in raw_values:
+        sym = screener_normalize_symbol(value)
+        if not sym or sym in seen:
+            continue
+        if len(sym) > 25 or ' ' in sym:
+            continue
+        symbols.append(sym)
+        seen.add(sym)
+    return symbols
+
+def screener_ema(prices, period):
+    return prices.ewm(span=period, adjust=False).mean()
+
+def screener_rsi(prices, period=14):
+    delta = prices.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    return 100 - (100 / (1 + rs))
+
+def screener_bollinger_position(close, length=20, std=2.0):
+    if len(close.dropna()) < length:
+        return 'NA'
+    ma = close.rolling(length).mean()
+    sd = close.rolling(length).std()
+    lower = ma - std * sd
+    upper = ma + std * sd
+    middle = ma
+    vals = [lower.iloc[-1], middle.iloc[-1], upper.iloc[-1], close.iloc[-1]]
+    if any(pd.isna(x) for x in vals):
+        return 'NA'
+    bb_lower, bb_middle, bb_upper, current_price = map(float, [lower.iloc[-1], middle.iloc[-1], upper.iloc[-1], close.iloc[-1]])
+    tolerance = 0.01
+    if current_price > (bb_upper + tolerance): return 'Above Band'
+    if current_price < (bb_lower - tolerance): return 'Below Band'
+    if abs(current_price - bb_upper) <= tolerance: return 'At Upper'
+    if abs(current_price - bb_lower) <= tolerance: return 'At Lower'
+    if abs(current_price - bb_middle) <= tolerance: return 'At Middle'
+    band_width = bb_upper - bb_lower
+    if band_width <= 0: return 'Mid Band'
+    pct = ((current_price - bb_lower) / band_width) * 100
+    if pct > 75: return 'Upper Band'
+    if pct > 60: return 'Above Mid'
+    if pct >= 40: return 'Mid Band'
+    if pct >= 25: return 'Below Mid'
+    return 'Lower Band'
+
+def screener_fetch_history(symbol, interval, period=None, days=None):
+    symbol = screener_normalize_symbol(symbol)
+    try:
+        ticker = yf.Ticker(symbol)
+        if period:
+            df = ticker.history(period=period, interval=interval, auto_adjust=False)
+        else:
+            end = datetime.now()
+            start = end - pd.Timedelta(days=days or 365)
+            df = ticker.history(start=start, end=end, interval=interval, auto_adjust=False)
+        if df is None or df.empty:
+            return pd.DataFrame()
+        df = df.rename(columns={c: str(c).lower() for c in df.columns})
+        return df.dropna(subset=['close'])
+    except Exception:
+        return pd.DataFrame()
+
+def screener_check_ema_symbol(symbol, config):
+    timeframe = config.get('timeframe', 'Weekly')
+    lookback_days = int(config.get('lookback_days', 20))
+    ema1 = int(config.get('ema1', 9)); ema2 = int(config.get('ema2', 18)); ema3 = int(config.get('ema3', 27))
+    if timeframe == '60min':
+        interval='1h'; periods=lookback_days * 7; days=90
+    elif timeframe == 'Daily':
+        interval='1d'; periods=lookback_days; days=730
+    else:
+        interval='1wk'; periods=max(5, int(lookback_days/7)); days=1460
+    min_needed = max(30, ema1, ema2, ema3) + 10
+    df = screener_fetch_history(symbol, interval=interval, days=days)
+    if df.empty or len(df) < min_needed:
+        return False, 'Insufficient data'
+    close = df['close']
+    df[f'ema{ema1}'] = screener_ema(close, ema1)
+    df[f'ema{ema2}'] = screener_ema(close, ema2)
+    df[f'ema{ema3}'] = screener_ema(close, ema3)
+    df['rsi14'] = screener_rsi(close, 14)
+    df = df.dropna()
+    if len(df) < 10:
+        return False, 'Insufficient indicator data'
+    recent = df.tail(periods)
+    below_all = ((recent['close'] < recent[f'ema{ema1}']) & (recent['close'] < recent[f'ema{ema2}']) & (recent['close'] < recent[f'ema{ema3}']))
+    latest = df.iloc[-1]
+    current = float(latest['close'])
+    above_now = current > float(latest[f'ema{ema1}']) and current > float(latest[f'ema{ema2}']) and current > float(latest[f'ema{ema3}'])
+    if not below_all.any() or not above_now:
+        return False, 'No bullish EMA reversal'
+    return True, {
+        'symbol': screener_normalize_symbol(symbol),
+        'current_price': round(current, 2),
+        'rsi14': round(float(latest['rsi14']), 2),
+        'ema1_diff_pct': round(((current - float(latest[f'ema{ema1}'])) / float(latest[f'ema{ema1}'])) * 100, 2),
+        'ema2_diff_pct': round(((current - float(latest[f'ema{ema2}'])) / float(latest[f'ema{ema2}'])) * 100, 2),
+        'ema3_diff_pct': round(((current - float(latest[f'ema{ema3}'])) / float(latest[f'ema{ema3}'])) * 100, 2),
+    }
+
+def screener_prepare_volume_data(df, interval):
+    if interval in ['1h','1d']:
+        return df
+    return df.resample('1h').agg({'open':'first','high':'max','low':'min','close':'last','volume':'sum'}).dropna(subset=['high','close'])
+
+def screener_check_volume_symbol(symbol, config):
+    interval = config.get('interval', '15m')
+    volume_threshold = float(config.get('volume_threshold', 2.0))
+    price_threshold = float(config.get('price_threshold', 3.0))
+    min_price = float(config.get('min_price', 100.0))
+    rsi_threshold = float(config.get('rsi_threshold', 55.0))
+    rsi_length = int(config.get('rsi_length', 14))
+    period = '3mo' if interval == '1d' else '30d'
+    df = screener_fetch_history(symbol, interval=interval, period=period)
+    if df.empty:
+        return False, 'No data'
+    df = screener_prepare_volume_data(df, interval)
+    if len(df) < max(21, rsi_length + 5):
+        return False, 'Insufficient data'
+    prev_5_vol = float(df.iloc[-10:-5]['volume'].mean())
+    curr_5_vol = float(df.iloc[-5:]['volume'].mean())
+    prev_5_price = float(df.iloc[-10:-5]['close'].mean())
+    curr_5_price = float(df.iloc[-5:]['close'].mean())
+    current_price = float(df.iloc[-1]['close'])
+    if prev_5_vol <= 0 or prev_5_price <= 0:
+        return False, 'Zero denominator'
+    rsi_series = screener_rsi(df['close'], rsi_length)
+    current_rsi = float(rsi_series.iloc[-1])
+    if pd.isna(current_rsi):
+        return False, 'RSI not available'
+    volume_ratio = curr_5_vol / prev_5_vol
+    price_change_pct = ((curr_5_price - prev_5_price) / prev_5_price) * 100
+    bb_position = screener_bollinger_position(df['close'])
+    if volume_ratio >= volume_threshold and price_change_pct >= price_threshold and current_price > min_price and current_rsi > rsi_threshold and curr_5_vol > prev_5_vol:
+        return True, {
+            'symbol': screener_normalize_symbol(symbol),
+            'prev_5_vol': round(prev_5_vol),
+            'curr_5_vol': round(curr_5_vol),
+            'current_price': round(current_price, 2),
+            'volume_ratio': round(volume_ratio, 2),
+            'price_change_pct': round(price_change_pct, 2),
+            'rsi': round(current_rsi, 1),
+            'bb_position': bb_position,
+        }
+    return False, 'No volume breakout'
+
+def screener_iter_scan_events(sheet_name, scanner, config, max_symbols=None):
+    symbols = screener_load_symbols(sheet_name)
+    if max_symbols:
+        symbols = symbols[:int(max_symbols)]
+    total = len(symbols); matches = 0; errors = []
+    def event(payload):
+        return json.dumps(payload, default=str) + '\n'
+    yield event({'type':'start','sheet':sheet_name,'scanner':scanner,'total':total,'scanned':0,'matches':0,'percent':0,'symbol':''})
+    for i, symbol in enumerate(symbols, start=1):
+        yield event({'type':'progress','symbol':symbol,'scanned':i-1,'total':total,'matches':matches,'percent':round((i-1)/total*100,2) if total else 100,'message':f'Scanning {symbol} ({i}/{total})'})
+        try:
+            matched, details = screener_check_ema_symbol(symbol, config) if scanner == 'ema' else screener_check_volume_symbol(symbol, config)
+            if matched and isinstance(details, dict):
+                matches += 1
+                yield event({'type':'result','symbol':symbol,'row':details,'scanned':i,'total':total,'matches':matches,'percent':round(i/total*100,2) if total else 100})
+        except Exception as exc:
+            errors.append({'symbol':symbol, 'error':str(exc)[:120]})
+        yield event({'type':'progress','symbol':symbol,'scanned':i,'total':total,'matches':matches,'percent':round(i/total*100,2) if total else 100,'message':f'Completed {symbol} ({i}/{total})'})
+    yield event({'type':'done','sheet':sheet_name,'scanner':scanner,'scanned':total,'total':total,'matches':matches,'percent':100,'errors':errors[:25],'message':f'Scan completed: {matches} matches from {total} symbols.'})
+
+@app.route('/api/screener/sheets', methods=['GET'])
+def api_screener_sheets():
+    return jsonify({'sheets': screener_sheet_names(), 'data_file': os.path.basename(SCREENER_DATA_FILE), 'exists': os.path.exists(SCREENER_DATA_FILE)})
+
+@app.route('/api/screener/symbols', methods=['GET'])
+def api_screener_symbols():
+    sheet = request.args.get('sheet', '')
+    try:
+        symbols = screener_load_symbols(sheet)
+        return jsonify({'sheet': sheet, 'count': len(symbols), 'symbols': symbols[:1000]})
+    except Exception as exc:
+        return jsonify({'error': str(exc)}), 400
+
+@app.route('/api/screener/scan_stream/<scanner>', methods=['POST'])
+def api_screener_scan_stream(scanner):
+    if scanner not in {'ema', 'volume'}:
+        return jsonify({'error': "scanner must be 'ema' or 'volume'"}), 400
+    payload = get_request_json()
+    sheet = payload.get('sheet')
+    config = payload.get('config', {})
+    max_symbols = payload.get('max_symbols')
+    if max_symbols in ('', None):
+        max_symbols = None
+    try:
+        return Response(
+            screener_iter_scan_events(sheet, scanner, config, max_symbols),
+            mimetype='application/x-ndjson',
+            headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
+        )
+    except Exception as exc:
+        return jsonify({'error': str(exc)}), 400
+
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
