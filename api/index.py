@@ -38,6 +38,7 @@ USERS_FILE = os.path.join(DATA_DIR, 'users.json')
 PORTFOLIOS_FILE = os.path.join(DATA_DIR, 'portfolios.json')
 WATCHLISTS_FILE = os.path.join(DATA_DIR, 'watchlists.json')
 TRADES_FILE = os.path.join(DATA_DIR, 'trades.json')
+ALERTS_FILE = os.path.join(DATA_DIR, 'portfolio_alerts.json')
 
 
 # ─── PERSISTENT STORAGE: Neon PostgreSQL on Vercel ───────────────────────────
@@ -219,6 +220,21 @@ def init_db():
                     )
                 """)
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_trades_user ON trades(user_id)")
+
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS portfolio_alerts (
+                        id TEXT PRIMARY KEY,
+                        user_id TEXT NOT NULL,
+                        holding_id TEXT,
+                        symbol TEXT NOT NULL,
+                        column_name TEXT NOT NULL,
+                        condition_op TEXT NOT NULL,
+                        threshold DOUBLE PRECISION NOT NULL,
+                        active BOOLEAN NOT NULL DEFAULT TRUE,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_portfolio_alerts_user ON portfolio_alerts(user_id)")
         DB_INIT_DONE = True
         DB_LAST_ERROR = None
         return True
@@ -346,6 +362,20 @@ def db_add_watchlist_group(user_id, name):
             cur.execute('INSERT INTO watchlist_groups (user_id, name) VALUES (%s,%s) ON CONFLICT DO NOTHING', (user_id, group_name))
             return group_name
 
+def db_delete_watchlist_group(user_id, group_name):
+    group_name = normalize_watchlist_group(group_name)
+    if group_name == 'Default':
+        return 0
+    if not init_db():
+        return None
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute('DELETE FROM watchlist WHERE user_id=%s AND group_name=%s', (user_id, group_name))
+            removed_items = cur.rowcount
+            cur.execute('DELETE FROM watchlist_groups WHERE user_id=%s AND name=%s', (user_id, group_name))
+            removed_group = cur.rowcount
+    return {'removed_items': removed_items, 'removed_group': removed_group}
+
 def db_get_watchlist(user_id, group_name='Default'):
     if not init_db():
         return None
@@ -418,6 +448,41 @@ def db_add_trade(user_id, trade):
         with conn.cursor() as cur:
             cur.execute('INSERT INTO trades (id, user_id, symbol, name, buy_price, sell_price, qty, buy_date, sell_date, pnl, pnl_pct) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)', (trade['id'], user_id, trade['symbol'], trade.get('name'), trade['buy_price'], trade['sell_price'], trade['qty'], trade.get('buy_date'), trade.get('sell_date'), trade['pnl'], trade['pnl_pct']))
     return trade
+
+def db_get_portfolio_alerts(user_id):
+    if not init_db():
+        return None
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute('SELECT id, user_id, holding_id, symbol, column_name, condition_op, threshold, active, created_at FROM portfolio_alerts WHERE user_id=%s AND active=TRUE ORDER BY created_at DESC', (user_id,))
+            rows = cur.fetchall() or []
+    return [_row_to_dict(r) for r in rows]
+
+def db_add_portfolio_alert(user_id, data):
+    if not init_db():
+        raise RuntimeError(DB_LAST_ERROR or 'Database is not initialized')
+    alert_id = str(uuid.uuid4())
+    column_name = str(data.get('column_name') or data.get('column') or 'ltp')
+    condition_op = str(data.get('condition_op') or data.get('condition') or '>')
+    if column_name not in ('ltp', 'pnl_pct', 'day_chg_pct'):
+        raise ValueError('Invalid alert column')
+    if condition_op not in ('>', '>=', '=', '<', '<='):
+        raise ValueError('Invalid alert condition')
+    threshold = float(data.get('threshold'))
+    symbol = str(data.get('symbol') or '').upper().strip()
+    holding_id = str(data.get('holding_id') or '').strip()
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute('INSERT INTO portfolio_alerts (id, user_id, holding_id, symbol, column_name, condition_op, threshold) VALUES (%s,%s,%s,%s,%s,%s,%s)', (alert_id, user_id, holding_id, symbol, column_name, condition_op, threshold))
+    return {'id': alert_id, 'user_id': user_id, 'holding_id': holding_id, 'symbol': symbol, 'column_name': column_name, 'condition_op': condition_op, 'threshold': threshold, 'active': True}
+
+def db_delete_portfolio_alert(user_id, alert_id):
+    if not init_db():
+        return None
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute('DELETE FROM portfolio_alerts WHERE user_id=%s AND id=%s', (user_id, alert_id))
+            return cur.rowcount
 
 TOP_MOVERS_CACHE = {'ts': 0, 'data': None}
 TOP_MOVERS_TTL = 300
@@ -1331,6 +1396,31 @@ def add_watchlist_group(user_id):
     save_json(WATCHLISTS_FILE, watchlists)
     return jsonify({'message': 'Group ready', 'group': group_name, 'storage': 'json-fallback'})
 
+
+@app.route('/api/watchlist-groups/<user_id>/<path:group_name>', methods=['DELETE'])
+def delete_watchlist_group(user_id, group_name):
+    group_name = normalize_watchlist_group(group_name)
+    if group_name == 'Default':
+        return jsonify({'error': 'Default group cannot be removed'}), 400
+    if db_configured():
+        result = db_delete_watchlist_group(user_id, group_name)
+        return jsonify({'message': 'Group removed', 'group': group_name, 'removed_items': (result or {}).get('removed_items', 0), 'storage': 'neon'})
+    watchlists = load_json(WATCHLISTS_FILE)
+    raw = watchlists.get(user_id, [])
+    removed = 0
+    if isinstance(raw, dict) and group_name in raw:
+        removed = len(raw.get(group_name) or [])
+        raw.pop(group_name, None)
+        watchlists[user_id] = raw
+        save_json(WATCHLISTS_FILE, watchlists)
+    return jsonify({'message': 'Group removed', 'group': group_name, 'removed_items': removed, 'storage': 'json-fallback'})
+
+@app.route('/api/watchlist-groups/<user_id>/delete', methods=['POST'])
+def delete_watchlist_group_post(user_id):
+    data = get_request_json()
+    group_name = normalize_watchlist_group(data.get('group_name') or data.get('group') or data.get('name'))
+    return delete_watchlist_group(user_id, group_name)
+
 @app.route('/api/watchlist/<user_id>', methods=['GET'])
 def get_watchlist(user_id):
     group_name = _watchlist_group_from_request()
@@ -1428,6 +1518,54 @@ def remove_watchlist_json(user_id):
         return jsonify({'error': 'symbol is required'}), 400
     removed = _remove_watchlist_record(user_id, symbol, group_name)
     return jsonify({'message': 'Removed', 'removed': removed, 'group': group_name, 'symbol': _strip_exchange_suffix(symbol)})
+
+
+@app.route('/api/portfolio-alerts/<user_id>', methods=['GET'])
+def get_portfolio_alerts(user_id):
+    alerts = db_get_portfolio_alerts(user_id) if db_configured() else None
+    if alerts is None:
+        data = load_json(ALERTS_FILE)
+        alerts = data.get(user_id, [])
+    return jsonify(alerts or [])
+
+@app.route('/api/portfolio-alerts/<user_id>', methods=['POST'])
+def add_portfolio_alert(user_id):
+    data = get_request_json()
+    if not data.get('symbol'):
+        return jsonify({'error': 'symbol is required'}), 400
+    if data.get('threshold') in (None, ''):
+        return jsonify({'error': 'threshold is required'}), 400
+    if db_configured():
+        try:
+            alert = db_add_portfolio_alert(user_id, data)
+        except Exception as e:
+            return jsonify({'error': str(e)}), 400
+        return jsonify({'message': 'Alert saved', 'alert': alert, 'storage': 'neon'})
+    alerts = load_json(ALERTS_FILE)
+    alert = {
+        'id': str(uuid.uuid4()), 'user_id': user_id,
+        'holding_id': str(data.get('holding_id') or ''),
+        'symbol': str(data.get('symbol') or '').upper().strip(),
+        'column_name': data.get('column_name') or data.get('column') or 'ltp',
+        'condition_op': data.get('condition_op') or data.get('condition') or '>',
+        'threshold': float(data.get('threshold')), 'active': True,
+        'created_at': datetime.utcnow().isoformat()
+    }
+    alerts.setdefault(user_id, []).append(alert)
+    save_json(ALERTS_FILE, alerts)
+    return jsonify({'message': 'Alert saved', 'alert': alert, 'storage': 'json-fallback'})
+
+@app.route('/api/portfolio-alerts/<user_id>/<alert_id>', methods=['DELETE'])
+def delete_portfolio_alert(user_id, alert_id):
+    if db_configured():
+        removed = db_delete_portfolio_alert(user_id, alert_id)
+        return jsonify({'message': 'Alert removed', 'removed': removed, 'storage': 'neon'})
+    alerts = load_json(ALERTS_FILE)
+    current = alerts.get(user_id, [])
+    before = len(current)
+    alerts[user_id] = [a for a in current if str(a.get('id')) != str(alert_id)]
+    save_json(ALERTS_FILE, alerts)
+    return jsonify({'message': 'Alert removed', 'removed': before - len(alerts[user_id]), 'storage': 'json-fallback'})
 
 # ─── TRADES HISTORY ───────────────────────────────────────────────────────────
 
@@ -1778,6 +1916,19 @@ def get_snapshot_score(symbol):
 
         revenue = _first_available(fin, ['Total Revenue', 'Operating Revenue'], 0)
         prior_revenue = _first_available(fin, ['Total Revenue', 'Operating Revenue'], 1)
+        revenue_vals = []
+        eps_vals = []
+        if fin is not None and not fin.empty:
+            for i in range(min(6, len(fin.columns))):
+                revenue_vals.append(_first_available(fin, ['Total Revenue', 'Operating Revenue'], i))
+                eps_vals.append(_first_available(fin, ['Basic EPS', 'Diluted EPS'], i))
+        revenue_growth_series = []
+        for i in range(len(revenue_vals)-1):
+            pct = _pct_change(revenue_vals[i], revenue_vals[i+1])
+            if pct is not None:
+                revenue_growth_series.append(pct)
+        revenue_volatility = round(float(np.std(revenue_growth_series, ddof=1)), 2) if len(revenue_growth_series) >= 2 else None
+        eps_cagr, eps_cagr_period = _cagr(eps_vals)
         net_income = _first_available(fin, ['Net Income', 'Net Income Common Stockholders'], 0)
         prior_net_income = _first_available(fin, ['Net Income', 'Net Income Common Stockholders'], 1)
         ebit = _first_available(fin, ['EBIT', 'Operating Income'], 0)
@@ -1896,7 +2047,10 @@ def get_snapshot_score(symbol):
                     'operating_margin': operating_margin,
                     'net_margin': net_margin_snapshot,
                     'operating_cash_flow_margin': operating_cf_margin,
-                    'free_cash_flow_margin': free_cf_margin
+                    'free_cash_flow_margin': free_cf_margin,
+                    'revenue_volatility': revenue_volatility,
+                    'eps_cagr': eps_cagr,
+                    'eps_cagr_period': eps_cagr_period
                 },
                 'growth_quality': {
                     'revenue_growth': revenue_growth_latest,
