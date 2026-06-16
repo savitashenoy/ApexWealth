@@ -2263,13 +2263,59 @@ function alertColumnLabel(col) {
 }
 
 async function loadPortfolioAlerts() {
-  if (!USER) { portfolioAlerts = []; return; }
+  if (!USER) { portfolioAlerts = []; renderPortfolioAlertsTable(); return; }
   try {
     const data = await fetchJsonSafe(`${API}/portfolio-alerts/${encodeURIComponent(USER.user_id)}`, {cache:'no-store'});
     portfolioAlerts = Array.isArray(data) ? data : [];
   } catch(e) {
     portfolioAlerts = [];
   }
+  renderPortfolioAlertsTable();
+}
+
+function formatAlertDate(value) {
+  if (!value) return '-';
+  try { return new Date(value).toLocaleString('en-IN'); } catch(e) { return String(value); }
+}
+
+function alertStatus(alert) {
+  return alert.triggered_at ? 'Triggered' : (alert.active === false ? 'Inactive' : 'Active');
+}
+
+function renderPortfolioAlertsTable() {
+  const tbody = document.getElementById('portfolio-alerts-tbody');
+  if (!tbody) return;
+  const alerts = portfolioAlerts || [];
+  if (!alerts.length) {
+    tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><i class="fa fa-bell"></i><p>No alerts created yet</p></div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = alerts.map(a => {
+    const col = a.column_name || a.column || 'ltp';
+    const op = a.condition_op || a.condition || '>';
+    const status = alertStatus(a);
+    const name = `${a.symbol || ''} — ${alertColumnLabel(col)} ${op} ${a.threshold}`;
+    return `
+      <tr>
+        <td><div class="td-symbol">${escapeHtml(name)}</div></td>
+        <td><span class="alert-status ${status.toLowerCase()}">${status}</span></td>
+        <td class="td-mono">${formatAlertDate(a.triggered_at)}</td>
+        <td class="td-mono">${formatAlertDate(a.created_at)}</td>
+        <td>
+          <div class="action-icons">
+            <button class="action-btn edit" title="Edit Alert" onclick="editPortfolioAlert('${escapeHtml(String(a.id))}')"><i class="fa fa-pen"></i></button>
+            <button class="action-btn del" title="Delete Alert" onclick="deletePortfolioAlert('${escapeHtml(String(a.id))}')"><i class="fa fa-trash"></i></button>
+          </div>
+        </td>
+      </tr>`;
+  }).join('');
+}
+
+async function markPortfolioAlertTriggered(alertId) {
+  if (!USER || !alertId) return;
+  try {
+    await fetchJsonSafe(`${API}/portfolio-alerts/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(alertId)}/triggered`, {method:'POST', cache:'no-store'});
+  } catch(e) { /* non-blocking */ }
 }
 
 function checkPortfolioAlerts(holdings) {
@@ -2282,19 +2328,37 @@ function checkPortfolioAlerts(holdings) {
     const col = alert.column_name || alert.column || 'ltp';
     const actual = h[col];
     if (compareAlertValue(actual, alert.condition_op || alert.condition || '>', alert.threshold)) {
-      hits.push(`${h.symbol}: ${alertColumnLabel(col)} ${alert.condition_op} ${alert.threshold} — current ${actual}`);
+      hits.push({id: alert.id, text: `${h.symbol}: ${alertColumnLabel(col)} ${alert.condition_op || alert.condition || '>'} ${alert.threshold} — current ${actual}`});
+      if (!alert.triggered_at) {
+        alert.triggered_at = new Date().toISOString();
+        markPortfolioAlertTriggered(alert.id);
+      }
     }
   }
+  renderPortfolioAlertsTable();
   if (!hits.length) {
     panel.classList.remove('show');
     panel.innerHTML = '';
     return;
   }
   panel.classList.add('show');
-  panel.innerHTML = `<strong><i class="fa fa-bell"></i> Portfolio alerts triggered</strong><ul>${hits.map(h => `<li>${escapeHtml(h)}</li>`).join('')}</ul>`;
+  panel.innerHTML = `
+    <div class="alert-hit-head">
+      <strong><i class="fa fa-bell"></i> Portfolio alerts triggered</strong>
+      <button class="alert-hit-close" onclick="clearTriggeredAlertNotifications()"><i class="fa fa-times"></i> Clear</button>
+    </div>
+    <ul>${hits.map(h => `<li class="alert-hit-row"><span>${escapeHtml(h.text)}</span><button class="alert-dismiss-btn" onclick="deletePortfolioAlert('${escapeHtml(String(h.id))}')"><i class="fa fa-trash"></i> Delete</button></li>`).join('')}</ul>`;
+}
+
+function clearTriggeredAlertNotifications() {
+  const panel = document.getElementById('portfolio-alert-hit-panel');
+  if (!panel) return;
+  panel.classList.remove('show');
+  panel.innerHTML = '';
 }
 
 function openAlertModal(holdingId, symbol) {
+  document.getElementById('alert-id').value = '';
   document.getElementById('alert-holding-id').value = holdingId;
   document.getElementById('alert-symbol').value = symbol;
   document.getElementById('alert-column').value = 'ltp';
@@ -2303,11 +2367,45 @@ function openAlertModal(holdingId, symbol) {
   document.getElementById('alert-error').textContent = '';
   document.getElementById('alert-modal').classList.add('open');
 }
+
+function editPortfolioAlert(alertId) {
+  const a = (portfolioAlerts || []).find(x => String(x.id) === String(alertId));
+  if (!a) return;
+  document.getElementById('alert-id').value = a.id;
+  document.getElementById('alert-holding-id').value = a.holding_id || '';
+  document.getElementById('alert-symbol').value = a.symbol || '';
+  document.getElementById('alert-column').value = a.column_name || a.column || 'ltp';
+  document.getElementById('alert-condition').value = a.condition_op || a.condition || '>';
+  document.getElementById('alert-value').value = a.threshold;
+  document.getElementById('alert-error').textContent = '';
+  document.getElementById('alert-modal').classList.add('open');
+}
+
 function closeAlertModal() { document.getElementById('alert-modal').classList.remove('open'); }
+
+async function deletePortfolioAlert(alertId) {
+  if (!USER || !alertId) return;
+  if (!confirm('Delete this alert?')) return;
+  const before = portfolioAlerts.slice();
+  portfolioAlerts = portfolioAlerts.filter(a => String(a.id) !== String(alertId));
+  renderPortfolioAlertsTable();
+  clearTriggeredAlertNotifications();
+  try {
+    await fetchJsonSafe(`${API}/portfolio-alerts/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(alertId)}`, {method:'DELETE', cache:'no-store'});
+    await loadPortfolioAlerts();
+    checkPortfolioAlerts(holdingsData || []);
+    setLastUpdated('Portfolio alert deleted');
+  } catch(e) {
+    portfolioAlerts = before;
+    renderPortfolioAlertsTable();
+    alert(e.message || 'Could not delete alert.');
+  }
+}
 
 async function savePortfolioAlert() {
   const err = document.getElementById('alert-error');
   err.textContent = '';
+  const alertId = document.getElementById('alert-id').value;
   const holdingId = document.getElementById('alert-holding-id').value;
   const symbol = document.getElementById('alert-symbol').value;
   const column = document.getElementById('alert-column').value;
@@ -2315,13 +2413,16 @@ async function savePortfolioAlert() {
   const value = parseFloat(document.getElementById('alert-value').value);
   if (!Number.isFinite(value)) { err.textContent = 'Enter a valid alert value.'; return; }
   try {
-    await fetchJsonSafe(`${API}/portfolio-alerts/${encodeURIComponent(USER.user_id)}`, {
-      method:'POST', headers:{'Content-Type':'application/json'}, cache:'no-store',
+    const url = alertId
+      ? `${API}/portfolio-alerts/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(alertId)}`
+      : `${API}/portfolio-alerts/${encodeURIComponent(USER.user_id)}`;
+    await fetchJsonSafe(url, {
+      method: alertId ? 'PUT' : 'POST', headers:{'Content-Type':'application/json'}, cache:'no-store',
       body: JSON.stringify({holding_id: holdingId, symbol, column_name: column, condition_op: condition, threshold: value})
     });
     closeAlertModal();
     await loadPortfolio();
-    setLastUpdated('Portfolio alert saved');
+    setLastUpdated(alertId ? 'Portfolio alert updated' : 'Portfolio alert saved');
   } catch(e) {
     err.textContent = e.message || 'Could not save alert.';
   }
@@ -2477,13 +2578,15 @@ async function confirmEdit() {
 
 // PORTFOLIO TABS
 function switchPortTab(tab) {
-  document.querySelectorAll('.tabs-bar .tab-btn').forEach((b,i) => {
-    b.classList.remove('active');
-    if (['holdings','performance'][i] === tab) b.classList.add('active');
+  const tabs = ['holdings','alerts','performance'];
+  document.querySelectorAll('#page-portfolio .tabs-bar .tab-btn').forEach((b,i) => {
+    b.classList.toggle('active', tabs[i] === tab);
   });
   document.querySelectorAll('#page-portfolio .tab-content').forEach(t => t.classList.remove('active'));
-  document.getElementById(`tab-${tab}`).classList.add('active');
+  const target = document.getElementById(`tab-${tab}`);
+  if (target) target.classList.add('active');
   if (tab === 'performance') loadTrades();
+  if (tab === 'alerts') loadPortfolioAlerts();
 }
 
 function renderAllocationCharts() {
