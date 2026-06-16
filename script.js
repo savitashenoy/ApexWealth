@@ -575,12 +575,15 @@ function renderPortfolioAlertsTable() {
 }
 
 async function markPortfolioAlertTriggered(alert) {
-  if (!USER || !alert?.id || alert.triggered_at) return;
+  if (!USER || !alert?.id) return;
+  // Mark locally immediately so the same triggered alert does not notify again
+  // while switching panels or during repeated portfolio refreshes.
+  if (!alert.triggered_at) alert.triggered_at = new Date().toISOString();
   try {
     const res = await fetchJsonSafe(`${API}/portfolio-alerts/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(alert.id)}/triggered`, {method:'POST', cache:'no-store'});
-    alert.triggered_at = res.triggered_at || new Date().toISOString();
+    alert.triggered_at = res.triggered_at || alert.triggered_at;
     renderPortfolioAlertsTable();
-  } catch(e) { /* notification should still display even if status update fails */ }
+  } catch(e) { renderPortfolioAlertsTable(); }
 }
 
 function dismissTriggeredAlert(id) {
@@ -598,6 +601,10 @@ function checkPortfolioAlerts(holdings) {
   if (!panel) return;
   const hits = [];
   for (const alert of portfolioAlerts || []) {
+    // Only Active alerts are allowed to notify. Once an alert has triggered_at,
+    // keep it visible in the Alerts tab as Triggered but do not show notifications again.
+    if (alert.triggered_at) continue;
+    if (alert.active === false) continue;
     const h = (holdings || []).find(x => String(x.id) === String(alert.holding_id) || String(x.symbol).toUpperCase() === String(alert.symbol).toUpperCase());
     if (!h) continue;
     const col = alert.column_name || alert.column || 'ltp';
@@ -605,7 +612,7 @@ function checkPortfolioAlerts(holdings) {
     if (compareAlertValue(actual, alert.condition_op || alert.condition || '>', alert.threshold)) {
       markPortfolioAlertTriggered(alert);
       if (!portfolioAlertDismissedIds.has(String(alert.id))) {
-        hits.push({id: alert.id, text: `${h.symbol}: ${alertColumnLabel(col)} ${alert.condition_op} ${alert.threshold} — current ${actual}`});
+        hits.push({id: alert.id, text: `${h.symbol}: ${alertColumnLabel(col)} ${alert.condition_op || alert.condition || '>'} ${alert.threshold} — current ${actual}`});
       }
     }
   }
