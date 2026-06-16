@@ -231,9 +231,11 @@ def init_db():
                         condition_op TEXT NOT NULL,
                         threshold DOUBLE PRECISION NOT NULL,
                         active BOOLEAN NOT NULL DEFAULT TRUE,
+                        triggered_at TIMESTAMPTZ,
                         created_at TIMESTAMPTZ DEFAULT NOW()
                     )
                 """)
+                cur.execute("ALTER TABLE portfolio_alerts ADD COLUMN IF NOT EXISTS triggered_at TIMESTAMPTZ")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_portfolio_alerts_user ON portfolio_alerts(user_id)")
         DB_INIT_DONE = True
         DB_LAST_ERROR = None
@@ -454,7 +456,7 @@ def db_get_portfolio_alerts(user_id):
         return None
     with db_connect() as conn:
         with conn.cursor() as cur:
-            cur.execute('SELECT id, user_id, holding_id, symbol, column_name, condition_op, threshold, active, created_at FROM portfolio_alerts WHERE user_id=%s AND active=TRUE ORDER BY created_at DESC', (user_id,))
+            cur.execute('SELECT id, user_id, holding_id, symbol, column_name, condition_op, threshold, active, triggered_at, created_at FROM portfolio_alerts WHERE user_id=%s AND active=TRUE ORDER BY created_at DESC', (user_id,))
             rows = cur.fetchall() or []
     return [_row_to_dict(r) for r in rows]
 
@@ -475,6 +477,42 @@ def db_add_portfolio_alert(user_id, data):
         with conn.cursor() as cur:
             cur.execute('INSERT INTO portfolio_alerts (id, user_id, holding_id, symbol, column_name, condition_op, threshold) VALUES (%s,%s,%s,%s,%s,%s,%s)', (alert_id, user_id, holding_id, symbol, column_name, condition_op, threshold))
     return {'id': alert_id, 'user_id': user_id, 'holding_id': holding_id, 'symbol': symbol, 'column_name': column_name, 'condition_op': condition_op, 'threshold': threshold, 'active': True}
+
+def db_update_portfolio_alert(user_id, alert_id, data):
+    if not init_db():
+        raise RuntimeError(DB_LAST_ERROR or 'Database is not initialized')
+    column_name = str(data.get('column_name') or data.get('column') or 'ltp')
+    condition_op = str(data.get('condition_op') or data.get('condition') or '>')
+    if column_name not in ('ltp', 'pnl_pct', 'day_chg_pct'):
+        raise ValueError('Invalid alert column')
+    if condition_op not in ('>', '>=', '=', '<', '<='):
+        raise ValueError('Invalid alert condition')
+    threshold = float(data.get('threshold'))
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute('''
+                UPDATE portfolio_alerts
+                SET column_name=%s, condition_op=%s, threshold=%s, triggered_at=NULL, active=TRUE
+                WHERE user_id=%s AND id=%s
+            ''', (column_name, condition_op, threshold, user_id, alert_id))
+            removed = cur.rowcount
+    return {'id': alert_id, 'column_name': column_name, 'condition_op': condition_op, 'threshold': threshold, 'updated': removed}
+
+
+def db_mark_portfolio_alert_triggered(user_id, alert_id):
+    if not init_db():
+        return None
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute('''
+                UPDATE portfolio_alerts
+                SET triggered_at = COALESCE(triggered_at, NOW())
+                WHERE user_id=%s AND id=%s AND active=TRUE
+                RETURNING triggered_at
+            ''', (user_id, alert_id))
+            row = cur.fetchone()
+    return _dt_to_str(row['triggered_at']) if row else None
+
 
 def db_delete_portfolio_alert(user_id, alert_id):
     if not init_db():
@@ -1554,6 +1592,46 @@ def add_portfolio_alert(user_id):
     alerts.setdefault(user_id, []).append(alert)
     save_json(ALERTS_FILE, alerts)
     return jsonify({'message': 'Alert saved', 'alert': alert, 'storage': 'json-fallback'})
+
+@app.route('/api/portfolio-alerts/<user_id>/<alert_id>', methods=['PUT'])
+def update_portfolio_alert(user_id, alert_id):
+    data = get_request_json()
+    if data.get('threshold') in (None, ''):
+        return jsonify({'error': 'threshold is required'}), 400
+    if db_configured():
+        try:
+            alert = db_update_portfolio_alert(user_id, alert_id, data)
+        except Exception as e:
+            return jsonify({'error': str(e)}), 400
+        return jsonify({'message': 'Alert updated', 'alert': alert, 'storage': 'neon'})
+    alerts = load_json(ALERTS_FILE)
+    current = alerts.get(user_id, [])
+    updated = 0
+    for a in current:
+        if str(a.get('id')) == str(alert_id):
+            a['column_name'] = data.get('column_name') or data.get('column') or 'ltp'
+            a['condition_op'] = data.get('condition_op') or data.get('condition') or '>'
+            a['threshold'] = float(data.get('threshold'))
+            a['triggered_at'] = None
+            a['active'] = True
+            updated = 1
+    alerts[user_id] = current
+    save_json(ALERTS_FILE, alerts)
+    return jsonify({'message': 'Alert updated', 'updated': updated, 'storage': 'json-fallback'})
+
+@app.route('/api/portfolio-alerts/<user_id>/<alert_id>/triggered', methods=['POST'])
+def mark_portfolio_alert_triggered(user_id, alert_id):
+    if db_configured():
+        ts = db_mark_portfolio_alert_triggered(user_id, alert_id)
+        return jsonify({'message': 'Alert marked triggered', 'triggered_at': ts, 'storage': 'neon'})
+    alerts = load_json(ALERTS_FILE)
+    ts = datetime.utcnow().isoformat()
+    for a in alerts.get(user_id, []):
+        if str(a.get('id')) == str(alert_id) and a.get('active', True):
+            a['triggered_at'] = a.get('triggered_at') or ts
+            ts = a['triggered_at']
+    save_json(ALERTS_FILE, alerts)
+    return jsonify({'message': 'Alert marked triggered', 'triggered_at': ts, 'storage': 'json-fallback'})
 
 @app.route('/api/portfolio-alerts/<user_id>/<alert_id>', methods=['DELETE'])
 def delete_portfolio_alert(user_id, alert_id):

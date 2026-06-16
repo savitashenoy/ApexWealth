@@ -16,6 +16,7 @@ let activeAnalysisTab = 'technicals';
 let perfCumulativeChart;
 let watchlistPortfolioItem = null;
 let portfolioAlerts = [];
+let portfolioAlertDismissedIds = new Set();
 let watchlistGroups = ['Default'];
 let activeWatchlistGroup = 'Default';
 let watchlistGroupOwnerId = null;
@@ -535,6 +536,61 @@ async function loadPortfolioAlerts() {
   } catch(e) {
     portfolioAlerts = [];
   }
+  renderPortfolioAlertsTable();
+}
+
+function fmtDateTime(v) {
+  if (!v) return '—';
+  try {
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return escapeHtml(v);
+    return new Intl.DateTimeFormat('en-IN', {timeZone:'Asia/Kolkata', day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit'}).format(d);
+  } catch(e) { return escapeHtml(v); }
+}
+
+function alertConditionText(alert) {
+  return `${alert.symbol || ''} — ${alertColumnLabel(alert.column_name || alert.column)} ${alert.condition_op || alert.condition || '>'} ${alert.threshold}`;
+}
+
+function renderPortfolioAlertsTable() {
+  const tbody = document.getElementById('portfolio-alerts-tbody');
+  if (!tbody) return;
+  if (!portfolioAlerts.length) {
+    tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><i class="fa fa-bell"></i><p>No alerts created yet</p></div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = portfolioAlerts.map(a => {
+    const triggered = !!a.triggered_at;
+    return `<tr>
+      <td><strong>${escapeHtml(alertConditionText(a))}</strong></td>
+      <td><span class="alert-status ${triggered ? 'triggered' : 'active'}">${triggered ? 'Triggered' : 'Active'}</span></td>
+      <td>${fmtDateTime(a.triggered_at)}</td>
+      <td>${fmtDateTime(a.created_at)}</td>
+      <td><div class="action-icons">
+        <button class="action-btn edit" title="Edit Alert" onclick="editPortfolioAlert('${encodeURIComponent(a.id)}')"><i class="fa fa-pen"></i></button>
+        <button class="action-btn del" title="Delete Alert" onclick="deletePortfolioAlert('${encodeURIComponent(a.id)}')"><i class="fa fa-trash"></i></button>
+      </div></td>
+    </tr>`;
+  }).join('');
+}
+
+async function markPortfolioAlertTriggered(alert) {
+  if (!USER || !alert?.id || alert.triggered_at) return;
+  try {
+    const res = await fetchJsonSafe(`${API}/portfolio-alerts/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(alert.id)}/triggered`, {method:'POST', cache:'no-store'});
+    alert.triggered_at = res.triggered_at || new Date().toISOString();
+    renderPortfolioAlertsTable();
+  } catch(e) { /* notification should still display even if status update fails */ }
+}
+
+function dismissTriggeredAlert(id) {
+  portfolioAlertDismissedIds.add(String(id));
+  checkPortfolioAlerts(holdingsData || []);
+}
+function clearTriggeredAlertNotifications() {
+  (portfolioAlerts || []).forEach(a => portfolioAlertDismissedIds.add(String(a.id)));
+  const panel = document.getElementById('portfolio-alert-hit-panel');
+  if (panel) { panel.classList.remove('show'); panel.innerHTML = ''; }
 }
 
 function checkPortfolioAlerts(holdings) {
@@ -547,7 +603,10 @@ function checkPortfolioAlerts(holdings) {
     const col = alert.column_name || alert.column || 'ltp';
     const actual = h[col];
     if (compareAlertValue(actual, alert.condition_op || alert.condition || '>', alert.threshold)) {
-      hits.push(`${h.symbol}: ${alertColumnLabel(col)} ${alert.condition_op} ${alert.threshold} — current ${actual}`);
+      markPortfolioAlertTriggered(alert);
+      if (!portfolioAlertDismissedIds.has(String(alert.id))) {
+        hits.push({id: alert.id, text: `${h.symbol}: ${alertColumnLabel(col)} ${alert.condition_op} ${alert.threshold} — current ${actual}`});
+      }
     }
   }
   if (!hits.length) {
@@ -556,10 +615,11 @@ function checkPortfolioAlerts(holdings) {
     return;
   }
   panel.classList.add('show');
-  panel.innerHTML = `<strong><i class="fa fa-bell"></i> Portfolio alerts triggered</strong><ul>${hits.map(h => `<li>${escapeHtml(h)}</li>`).join('')}</ul>`;
+  panel.innerHTML = `<div class="alert-hit-head"><strong><i class="fa fa-bell"></i> Portfolio alerts triggered</strong><button class="alert-hit-close" title="Clear notifications" onclick="clearTriggeredAlertNotifications()"><i class="fa fa-times"></i></button></div><ul>${hits.map(h => `<li><div class="alert-hit-row"><span>${escapeHtml(h.text)}</span><button class="alert-dismiss-btn" onclick="dismissTriggeredAlert('${escapeHtml(h.id)}')">Delete notification</button></div></li>`).join('')}</ul>`;
 }
 
 function openAlertModal(holdingId, symbol) {
+  document.getElementById('alert-id').value = '';
   document.getElementById('alert-holding-id').value = holdingId;
   document.getElementById('alert-symbol').value = symbol;
   document.getElementById('alert-column').value = 'ltp';
@@ -570,9 +630,36 @@ function openAlertModal(holdingId, symbol) {
 }
 function closeAlertModal() { document.getElementById('alert-modal').classList.remove('open'); }
 
+function editPortfolioAlert(encodedId) {
+  const id = decodeURIComponent(encodedId);
+  const a = (portfolioAlerts || []).find(x => String(x.id) === String(id));
+  if (!a) return;
+  document.getElementById('alert-id').value = a.id;
+  document.getElementById('alert-holding-id').value = a.holding_id || '';
+  document.getElementById('alert-symbol').value = a.symbol || '';
+  document.getElementById('alert-column').value = a.column_name || a.column || 'ltp';
+  document.getElementById('alert-condition').value = a.condition_op || a.condition || '>';
+  document.getElementById('alert-value').value = a.threshold ?? '';
+  document.getElementById('alert-error').textContent = '';
+  document.getElementById('alert-modal').classList.add('open');
+}
+
+async function deletePortfolioAlert(encodedId) {
+  const id = decodeURIComponent(encodedId);
+  if (!confirm('Delete this alert?')) return;
+  try {
+    await fetchJsonSafe(`${API}/portfolio-alerts/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(id)}`, {method:'DELETE', cache:'no-store'});
+    portfolioAlertDismissedIds.delete(String(id));
+    await loadPortfolioAlerts();
+    checkPortfolioAlerts(holdingsData || []);
+    setLastUpdated('Portfolio alert deleted');
+  } catch(e) { alert(e.message || 'Could not delete alert.'); }
+}
+
 async function savePortfolioAlert() {
   const err = document.getElementById('alert-error');
   err.textContent = '';
+  const alertId = document.getElementById('alert-id').value;
   const holdingId = document.getElementById('alert-holding-id').value;
   const symbol = document.getElementById('alert-symbol').value;
   const column = document.getElementById('alert-column').value;
@@ -580,13 +667,15 @@ async function savePortfolioAlert() {
   const value = parseFloat(document.getElementById('alert-value').value);
   if (!Number.isFinite(value)) { err.textContent = 'Enter a valid alert value.'; return; }
   try {
-    await fetchJsonSafe(`${API}/portfolio-alerts/${encodeURIComponent(USER.user_id)}`, {
-      method:'POST', headers:{'Content-Type':'application/json'}, cache:'no-store',
+    const url = alertId ? `${API}/portfolio-alerts/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(alertId)}` : `${API}/portfolio-alerts/${encodeURIComponent(USER.user_id)}`;
+    await fetchJsonSafe(url, {
+      method: alertId ? 'PUT' : 'POST', headers:{'Content-Type':'application/json'}, cache:'no-store',
       body: JSON.stringify({holding_id: holdingId, symbol, column_name: column, condition_op: condition, threshold: value})
     });
+    if (alertId) portfolioAlertDismissedIds.delete(String(alertId));
     closeAlertModal();
     await loadPortfolio();
-    setLastUpdated('Portfolio alert saved');
+    setLastUpdated(alertId ? 'Portfolio alert updated' : 'Portfolio alert saved');
   } catch(e) {
     err.textContent = e.message || 'Could not save alert.';
   }
@@ -742,13 +831,15 @@ async function confirmEdit() {
 
 // PORTFOLIO TABS
 function switchPortTab(tab) {
-  document.querySelectorAll('.tabs-bar .tab-btn').forEach((b,i) => {
+  const order = ['holdings','alerts','performance'];
+  document.querySelectorAll('#page-portfolio .tabs-bar .tab-btn').forEach((b,i) => {
     b.classList.remove('active');
-    if (['holdings','performance'][i] === tab) b.classList.add('active');
+    if (order[i] === tab) b.classList.add('active');
   });
   document.querySelectorAll('#page-portfolio .tab-content').forEach(t => t.classList.remove('active'));
   document.getElementById(`tab-${tab}`).classList.add('active');
   if (tab === 'performance') loadTrades();
+  if (tab === 'alerts') { loadPortfolioAlerts(); }
 }
 
 function renderAllocationCharts() {

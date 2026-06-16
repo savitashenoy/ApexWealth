@@ -637,6 +637,15 @@ body.light .score-detail-table thead th { background: #e4e0d6; }
 .alert-hit-panel.show { display:block; }
 .alert-hit-panel strong { color:#e6a043; }
 .alert-hit-panel ul { margin:6px 0 0 18px; padding:0; }
+.alert-hit-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.alert-hit-close { border:none; background:transparent; color:var(--dim); cursor:pointer; font-size:.86rem; padding:2px 6px; }
+.alert-hit-close:hover { color:var(--red); }
+.alert-hit-row { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.alert-dismiss-btn { border:1px solid var(--border); background:var(--hover); color:var(--dim); border-radius:6px; cursor:pointer; font-size:.7rem; padding:2px 6px; }
+.alert-dismiss-btn:hover { border-color:var(--red); color:var(--red); }
+.alert-status { display:inline-flex; align-items:center; gap:5px; border-radius:999px; padding:4px 8px; font-size:.68rem; font-weight:800; text-transform:uppercase; letter-spacing:.5px; }
+.alert-status.active { color:#2E6F40; background:rgba(46,111,64,.15); border:1px solid rgba(46,111,64,.25); }
+.alert-status.triggered { color:#e6a043; background:rgba(230,160,67,.16); border:1px solid rgba(230,160,67,.35); }
 .alert-field-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
 @media(max-width:600px){ .alert-field-grid { grid-template-columns:1fr; } }
 .watchlist-add-row { display: flex; gap: 12px; margin-bottom: 16px; align-items: flex-end; }
@@ -1178,6 +1187,7 @@ body.light .screener-card, body.light .screener-tab-btn { background:#f5f2eb; }
 
       <div class="tabs-bar">
         <button class="tab-btn active" onclick="switchPortTab('holdings')">Holdings</button>
+        <button class="tab-btn" onclick="switchPortTab('alerts')">Alerts</button>
         <button class="tab-btn" onclick="switchPortTab('performance')">Performance Report</button>
       </div>
 
@@ -1226,6 +1236,22 @@ body.light .screener-card, body.light .screener-tab-btn { background:#f5f2eb; }
             </thead>
             <tbody id="holdings-tbody">
               <tr><td colspan="11"><div class="loading-overlay"><div class="spinner"></div> Loading…</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+
+      <!-- ALERTS TAB -->
+      <div class="tab-content" id="tab-alerts">
+        <div class="tbl-section-title"><i class="fa fa-bell"></i> Portfolio Alerts</div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Name</th><th>Status</th><th>Triggered Date/time</th><th>Created Date/time</th><th>Action</th></tr>
+            </thead>
+            <tbody id="portfolio-alerts-tbody">
+              <tr><td colspan="5"><div class="empty-state"><i class="fa fa-bell"></i><p>No alerts created yet</p></div></td></tr>
             </tbody>
           </table>
         </div>
@@ -1637,6 +1663,7 @@ body.light .screener-card, body.light .screener-tab-btn { background:#f5f2eb; }
   <div class="modal">
     <div class="modal-title">◈ Portfolio Alert</div>
     <div class="modal-form">
+      <input type="hidden" id="alert-id" />
       <input type="hidden" id="alert-holding-id" />
       <div class="form-group">
         <div class="form-label">Ticker</div>
