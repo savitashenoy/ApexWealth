@@ -1665,6 +1665,7 @@ body.light .screener-card, body.light .screener-tab-btn { background:#f5f2eb; }
     <div class="modal-form">
       <input type="hidden" id="alert-id" />
       <input type="hidden" id="alert-holding-id" />
+      <input type="hidden" id="alert-source" value="portfolio" />
       <div class="form-group">
         <div class="form-label">Ticker</div>
         <input class="form-input" type="text" id="alert-symbol" readonly/>
@@ -2294,7 +2295,8 @@ function renderPortfolioAlertsTable() {
     const col = a.column_name || a.column || 'ltp';
     const op = a.condition_op || a.condition || '>';
     const status = alertStatus(a);
-    const name = `${a.symbol || ''} — ${alertColumnLabel(col)} ${op} ${a.threshold}`;
+    const src = (a.source || (a.holding_id ? 'portfolio' : 'watchlist')) === 'watchlist' ? 'Watchlist' : 'Portfolio';
+    const name = `${a.symbol || ''} — ${alertColumnLabel(col)} ${op} ${a.threshold} (${src})`;
     return `
       <tr>
         <td><div class="td-symbol">${escapeHtml(name)}</div></td>
@@ -2331,6 +2333,7 @@ function checkPortfolioAlerts(holdings) {
     // Portfolio → Alerts but do not generate repeat notifications.
     if (alert.triggered_at) continue;
     if (alert.active === false) continue;
+    if ((alert.source || (alert.holding_id ? 'portfolio' : 'watchlist')) === 'watchlist') continue;
     const h = (holdings || []).find(x => String(x.id) === String(alert.holding_id) || String(x.symbol).toUpperCase() === String(alert.symbol).toUpperCase());
     if (!h) continue;
     const col = alert.column_name || alert.column || 'ltp';
@@ -2355,6 +2358,28 @@ function checkPortfolioAlerts(holdings) {
     <ul>${hits.map(h => `<li class="alert-hit-row"><span>${escapeHtml(h.text)}</span><button class="alert-dismiss-btn" onclick="deletePortfolioAlert('${escapeHtml(String(h.id))}')"><i class="fa fa-trash"></i> Delete</button></li>`).join('')}</ul>`;
 }
 
+function checkWatchlistAlerts(items) {
+  const hits = [];
+  for (const alert of portfolioAlerts || []) {
+    if (alert.triggered_at) continue;
+    if (alert.active === false) continue;
+    if ((alert.source || (alert.holding_id ? 'portfolio' : 'watchlist')) !== 'watchlist') continue;
+    const target = compactWatchlistSymbol(alert.symbol);
+    const item = (items || []).find(x => compactWatchlistSymbol(x.symbol) === target);
+    if (!item) continue;
+    const col = alert.column_name || alert.column || 'ltp';
+    const actual = col === 'day_chg_pct' ? item.day_chg_pct : item.ltp;
+    if (compareAlertValue(actual, alert.condition_op || alert.condition || '>', alert.threshold)) {
+      markPortfolioAlertTriggered(alert);
+      hits.push({id: alert.id, text: `${item.symbol}: ${alertColumnLabel(col)} ${alert.condition_op || alert.condition || '>'} ${alert.threshold} — current ${actual}`});
+    }
+  }
+  renderPortfolioAlertsTable();
+  if (hits.length && activePage === 'portfolio') {
+    checkPortfolioAlerts(holdingsData || []);
+  }
+}
+
 function clearTriggeredAlertNotifications() {
   const panel = document.getElementById('portfolio-alert-hit-panel');
   if (!panel) return;
@@ -2362,15 +2387,32 @@ function clearTriggeredAlertNotifications() {
   panel.innerHTML = '';
 }
 
-function openAlertModal(holdingId, symbol) {
+function configureAlertColumnOptions(source, selected='ltp') {
+  const sel = document.getElementById('alert-column');
+  if (!sel) return;
+  const opts = source === 'watchlist'
+    ? [{v:'ltp', t:'LTP'}, {v:'day_chg_pct', t:'Day Chng %'}]
+    : [{v:'ltp', t:'LTP'}, {v:'pnl_pct', t:'P&L (%)'}, {v:'day_chg_pct', t:'Day Chng %'}];
+  sel.innerHTML = opts.map(o => `<option value="${o.v}">${o.t}</option>`).join('');
+  sel.value = opts.some(o => o.v === selected) ? selected : 'ltp';
+}
+
+function openAlertModal(holdingId, symbol, source='portfolio') {
   document.getElementById('alert-id').value = '';
-  document.getElementById('alert-holding-id').value = holdingId;
+  document.getElementById('alert-holding-id').value = holdingId || '';
+  document.getElementById('alert-source').value = source || 'portfolio';
   document.getElementById('alert-symbol').value = symbol;
-  document.getElementById('alert-column').value = 'ltp';
+  configureAlertColumnOptions(source || 'portfolio', 'ltp');
   document.getElementById('alert-condition').value = '>';
   document.getElementById('alert-value').value = '';
   document.getElementById('alert-error').textContent = '';
   document.getElementById('alert-modal').classList.add('open');
+}
+
+function openWatchlistAlertModal(payload) {
+  let item = {};
+  try { item = JSON.parse(decodeURIComponent(payload)); } catch(e) { item = {}; }
+  openAlertModal('', item.symbol || '', 'watchlist');
 }
 
 function editPortfolioAlert(alertId) {
@@ -2378,8 +2420,9 @@ function editPortfolioAlert(alertId) {
   if (!a) return;
   document.getElementById('alert-id').value = a.id;
   document.getElementById('alert-holding-id').value = a.holding_id || '';
+  document.getElementById('alert-source').value = a.source || (a.holding_id ? 'portfolio' : 'watchlist');
   document.getElementById('alert-symbol').value = a.symbol || '';
-  document.getElementById('alert-column').value = a.column_name || a.column || 'ltp';
+  configureAlertColumnOptions(document.getElementById('alert-source').value, a.column_name || a.column || 'ltp');
   document.getElementById('alert-condition').value = a.condition_op || a.condition || '>';
   document.getElementById('alert-value').value = a.threshold;
   document.getElementById('alert-error').textContent = '';
@@ -2412,6 +2455,7 @@ async function savePortfolioAlert() {
   err.textContent = '';
   const alertId = document.getElementById('alert-id').value;
   const holdingId = document.getElementById('alert-holding-id').value;
+  const source = document.getElementById('alert-source').value || (holdingId ? 'portfolio' : 'watchlist');
   const symbol = document.getElementById('alert-symbol').value;
   const column = document.getElementById('alert-column').value;
   const condition = document.getElementById('alert-condition').value;
@@ -2423,11 +2467,12 @@ async function savePortfolioAlert() {
       : `${API}/portfolio-alerts/${encodeURIComponent(USER.user_id)}`;
     await fetchJsonSafe(url, {
       method: alertId ? 'PUT' : 'POST', headers:{'Content-Type':'application/json'}, cache:'no-store',
-      body: JSON.stringify({holding_id: holdingId, symbol, column_name: column, condition_op: condition, threshold: value})
+      body: JSON.stringify({holding_id: holdingId, source, symbol, column_name: column, condition_op: condition, threshold: value})
     });
     closeAlertModal();
-    await loadPortfolio();
-    setLastUpdated(alertId ? 'Portfolio alert updated' : 'Portfolio alert saved');
+    await loadPortfolioAlerts();
+    if (source === 'portfolio') await loadPortfolio(); else { await loadWatchlist(false); }
+    setLastUpdated(alertId ? 'Alert updated' : 'Alert saved');
   } catch(e) {
     err.textContent = e.message || 'Could not save alert.';
   }
@@ -2958,6 +3003,8 @@ async function loadWatchlist(refreshGroups = true) {
     setWatchlistLoadingProgress(78, 'Rendering watchlist table and heat map…', true);
     currentWatchlistItems = Array.isArray(items) ? items : [];
     renderWatchlistItems(currentWatchlistItems);
+    await loadPortfolioAlerts();
+    checkWatchlistAlerts(currentWatchlistItems);
     setWatchlistLoadingProgress(100, 'Watchlist loaded.', true);
     setTimeout(() => setWatchlistLoadingProgress(0, '', false), 450);
     setLastUpdated(`Watchlist · ${group}`);
@@ -2987,6 +3034,7 @@ function renderWatchlistItems(items) {
       <td><span class="badge ${(item.day_chg_pct||0) >= 0 ? 'badge-green' : 'badge-red'}">${(item.day_chg_pct||0) >= 0 ? '+' : ''}${item.day_chg_pct || 0}%</span></td>
       <td>
         <div class="action-icons">
+          <button class="action-btn edit" title="Set Alert" onclick="openWatchlistAlertModal('${encodeURIComponent(JSON.stringify({symbol:item.symbol, name:item.name || item.symbol, ltp:item.ltp || '', day_chg_pct:item.day_chg_pct || 0}))}')"><i class="fa fa-bell"></i></button>
           <button class="action-btn portfolio" title="Add to Portfolio" onclick="openWatchlistPortfolioModal('${encodeURIComponent(JSON.stringify({symbol:item.symbol, name:item.name || item.symbol, industry:item.industry || '', ltp:item.ltp || ''}))}')"><i class="fa fa-briefcase"></i></button>
           <button class="action-btn del" title="Remove" onclick="removeFromWatchlist('${encodeURIComponent(item.symbol)}', event)"><i class="fa fa-trash"></i></button>
         </div>

@@ -236,6 +236,8 @@ def init_db():
                     )
                 """)
                 cur.execute("ALTER TABLE portfolio_alerts ADD COLUMN IF NOT EXISTS triggered_at TIMESTAMPTZ")
+                cur.execute("ALTER TABLE portfolio_alerts ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'portfolio'")
+                cur.execute("UPDATE portfolio_alerts SET source='portfolio' WHERE source IS NULL OR source=''")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_portfolio_alerts_user ON portfolio_alerts(user_id)")
         DB_INIT_DONE = True
         DB_LAST_ERROR = None
@@ -456,7 +458,7 @@ def db_get_portfolio_alerts(user_id):
         return None
     with db_connect() as conn:
         with conn.cursor() as cur:
-            cur.execute('SELECT id, user_id, holding_id, symbol, column_name, condition_op, threshold, active, triggered_at, created_at FROM portfolio_alerts WHERE user_id=%s AND active=TRUE ORDER BY created_at DESC', (user_id,))
+            cur.execute("SELECT id, user_id, holding_id, symbol, column_name, condition_op, threshold, active, triggered_at, created_at, COALESCE(source,'portfolio') AS source FROM portfolio_alerts WHERE user_id=%s AND active=TRUE ORDER BY created_at DESC", (user_id,))
             rows = cur.fetchall() or []
     return [_row_to_dict(r) for r in rows]
 
@@ -464,26 +466,38 @@ def db_add_portfolio_alert(user_id, data):
     if not init_db():
         raise RuntimeError(DB_LAST_ERROR or 'Database is not initialized')
     alert_id = str(uuid.uuid4())
+    source = str(data.get('source') or '').lower().strip()
+    holding_id = str(data.get('holding_id') or '').strip()
+    if source not in ('portfolio', 'watchlist'):
+        source = 'portfolio' if holding_id else 'watchlist'
     column_name = str(data.get('column_name') or data.get('column') or 'ltp')
     condition_op = str(data.get('condition_op') or data.get('condition') or '>')
-    if column_name not in ('ltp', 'pnl_pct', 'day_chg_pct'):
+    allowed_cols = ('ltp', 'day_chg_pct') if source == 'watchlist' else ('ltp', 'pnl_pct', 'day_chg_pct')
+    if column_name not in allowed_cols:
         raise ValueError('Invalid alert column')
     if condition_op not in ('>', '>=', '=', '<', '<='):
         raise ValueError('Invalid alert condition')
     threshold = float(data.get('threshold'))
     symbol = str(data.get('symbol') or '').upper().strip()
-    holding_id = str(data.get('holding_id') or '').strip()
     with db_connect() as conn:
         with conn.cursor() as cur:
-            cur.execute('INSERT INTO portfolio_alerts (id, user_id, holding_id, symbol, column_name, condition_op, threshold) VALUES (%s,%s,%s,%s,%s,%s,%s)', (alert_id, user_id, holding_id, symbol, column_name, condition_op, threshold))
-    return {'id': alert_id, 'user_id': user_id, 'holding_id': holding_id, 'symbol': symbol, 'column_name': column_name, 'condition_op': condition_op, 'threshold': threshold, 'active': True}
+            cur.execute('INSERT INTO portfolio_alerts (id, user_id, holding_id, symbol, column_name, condition_op, threshold, source) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)', (alert_id, user_id, holding_id, symbol, column_name, condition_op, threshold, source))
+    return {'id': alert_id, 'user_id': user_id, 'holding_id': holding_id, 'symbol': symbol, 'column_name': column_name, 'condition_op': condition_op, 'threshold': threshold, 'active': True, 'source': source}
 
 def db_update_portfolio_alert(user_id, alert_id, data):
     if not init_db():
         raise RuntimeError(DB_LAST_ERROR or 'Database is not initialized')
     column_name = str(data.get('column_name') or data.get('column') or 'ltp')
     condition_op = str(data.get('condition_op') or data.get('condition') or '>')
-    if column_name not in ('ltp', 'pnl_pct', 'day_chg_pct'):
+    source = str(data.get('source') or '').lower().strip()
+    if not source:
+        with db_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute('SELECT COALESCE(source, %s) AS source FROM portfolio_alerts WHERE user_id=%s AND id=%s', ('portfolio', user_id, alert_id))
+                row = cur.fetchone()
+                source = row['source'] if row else 'portfolio'
+    allowed_cols = ('ltp', 'day_chg_pct') if source == 'watchlist' else ('ltp', 'pnl_pct', 'day_chg_pct')
+    if column_name not in allowed_cols:
         raise ValueError('Invalid alert column')
     if condition_op not in ('>', '>=', '=', '<', '<='):
         raise ValueError('Invalid alert condition')
@@ -496,7 +510,7 @@ def db_update_portfolio_alert(user_id, alert_id, data):
                 WHERE user_id=%s AND id=%s
             ''', (column_name, condition_op, threshold, user_id, alert_id))
             removed = cur.rowcount
-    return {'id': alert_id, 'column_name': column_name, 'condition_op': condition_op, 'threshold': threshold, 'updated': removed}
+    return {'id': alert_id, 'column_name': column_name, 'condition_op': condition_op, 'threshold': threshold, 'source': source, 'updated': removed}
 
 
 def db_mark_portfolio_alert_triggered(user_id, alert_id):
@@ -1587,6 +1601,7 @@ def add_portfolio_alert(user_id):
         'column_name': data.get('column_name') or data.get('column') or 'ltp',
         'condition_op': data.get('condition_op') or data.get('condition') or '>',
         'threshold': float(data.get('threshold')), 'active': True,
+        'source': data.get('source') or ('portfolio' if data.get('holding_id') else 'watchlist'),
         'created_at': datetime.utcnow().isoformat()
     }
     alerts.setdefault(user_id, []).append(alert)
