@@ -2218,6 +2218,25 @@ function renderDashCharts(holdings) {
   }
 }
 
+
+function moneyOrDash(value, prefix='₹') {
+  if (value === null || value === undefined || value === '' || Number.isNaN(Number(value))) return '—';
+  return `${prefix}${fmtNum(Number(value))}`;
+}
+
+async function runWatchlistAlertChecksForPortfolioRefresh() {
+  if (!USER || !(portfolioAlerts || []).some(a => !a.triggered_at && a.active !== false && ((a.source || (a.holding_id ? 'portfolio' : 'watchlist')) === 'watchlist'))) return;
+  let items = Array.isArray(currentWatchlistItems) ? currentWatchlistItems : [];
+  if (!items.length) {
+    try {
+      const group = getSelectedWatchlistGroup();
+      items = await fetchJsonSafe(`${API}/watchlist/${encodeURIComponent(USER.user_id)}?group=${encodeURIComponent(group)}`, {cache:'no-store'});
+      if (Array.isArray(items)) currentWatchlistItems = items;
+    } catch(e) { items = []; }
+  }
+  checkWatchlistAlerts(items || []);
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // PORTFOLIO
 // ──────────────────────────────────────────────────────────────────────────────
@@ -2231,6 +2250,7 @@ async function loadPortfolio() {
   renderPortfolioCards(holdings);
   await loadPortfolioAlerts();
   checkPortfolioAlerts(holdings);
+  await runWatchlistAlertChecksForPortfolioRefresh();
   await loadTrades();
   setLastUpdated('Portfolio');
 }
@@ -2262,7 +2282,7 @@ function renderHoldingsTable(holdings) {
       <td class="td-symbol">${h.symbol}</td>
       <td class="td-mono">₹${h.buy_price}</td>
       <td class="td-mono">${h.qty}</td>
-      <td class="td-mono">₹${h.ltp}</td>
+      <td class="td-mono">${moneyOrDash(h.ltp)}</td>
       <td class="td-mono">₹${fmtNum(h.invested)}</td>
       <td class="td-mono">₹${fmtNum(h.curr_value)}</td>
       <td class="td-mono ${h.pnl >= 0 ? 'td-green' : 'td-red'}">${h.pnl >= 0 ? '+' : ''}₹${fmtNum(h.pnl)}</td>
@@ -2272,7 +2292,7 @@ function renderHoldingsTable(holdings) {
         <div class="action-icons">
           <button class="action-btn edit" title="Set Alert" onclick="openAlertModal('${h.id}','${h.symbol}')"><i class="fa fa-bell"></i></button>
           <button class="action-btn edit" title="Edit" onclick="openEditModal('${h.id}','${h.symbol}','${h.buy_price}','${h.qty}','${h.date}')"><i class="fa fa-pen"></i></button>
-          <button class="action-btn sell" title="Sell" onclick="openSellModal('${h.id}','${h.symbol}','${h.ltp}','${h.qty}')"><i class="fa fa-dollar-sign"></i></button>
+          <button class="action-btn sell" title="Sell" onclick="openSellModal('${h.id}','${h.symbol}','${h.ltp ?? h.buy_price}','${h.qty}')"><i class="fa fa-dollar-sign"></i></button>
           <button class="action-btn del" title="Remove" onclick="deleteHolding('${encodeURIComponent(h.id)}', event)"><i class="fa fa-trash"></i></button>
         </div>
       </td>
@@ -2408,9 +2428,15 @@ function checkWatchlistAlerts(items) {
     }
   }
   renderPortfolioAlertsTable();
-  if (hits.length && activePage === 'portfolio') {
-    checkPortfolioAlerts(holdingsData || []);
-  }
+  const panel = document.getElementById('portfolio-alert-hit-panel');
+  if (!hits.length || !panel || activePage !== 'portfolio') return;
+  panel.classList.add('show');
+  panel.innerHTML = `
+    <div class="alert-hit-head">
+      <strong><i class="fa fa-bell"></i> Watchlist alerts triggered</strong>
+      <button class="alert-hit-close" onclick="clearTriggeredAlertNotifications()"><i class="fa fa-times"></i> Clear</button>
+    </div>
+    <ul>${hits.map(h => `<li class="alert-hit-row"><span>${escapeHtml(h.text)}</span><button class="alert-dismiss-btn" onclick="deletePortfolioAlert('${escapeHtml(String(h.id))}')"><i class="fa fa-trash"></i> Delete</button></li>`).join('')}</ul>`;
 }
 
 function clearTriggeredAlertNotifications() {
@@ -2565,7 +2591,7 @@ async function addHolding() {
     selectedTicker = null;
     await loadPortfolio();
     setLastUpdated('Holding added');
-    await loadDashboard();
+    loadDashboard();
   } else {
     const d = await r.json();
     errEl.textContent = d.error || 'Error adding holding';
@@ -2577,15 +2603,26 @@ async function deleteHolding(id, ev) {
   const holdingId = decodeURIComponent(id || '');
   if (!USER || !holdingId) return;
   if (!confirm('Remove this holding?')) return;
+  const before = holdingsData.slice();
+  holdingsData = holdingsData.filter(h => String(h.id) !== String(holdingId));
+  renderHoldingsTable(holdingsData);
+  renderPortfolioCards(holdingsData);
   try {
-    await fetchJsonSafe(`${API}/holdings/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(holdingId)}`, {method:'DELETE', cache:'no-store'});
-  } catch(err) {
-    // Some serverless/proxy setups are stricter with DELETE. Use POST fallback.
-    await fetchJsonSafe(`${API}/holdings/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(holdingId)}/delete`, {method:'POST', cache:'no-store'});
+    try {
+      await fetchJsonSafe(`${API}/holdings/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(holdingId)}`, {method:'DELETE', cache:'no-store'});
+    } catch(err) {
+      // Some serverless/proxy setups are stricter with DELETE. Use POST fallback.
+      await fetchJsonSafe(`${API}/holdings/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(holdingId)}/delete`, {method:'POST', cache:'no-store'});
+    }
+    setLastUpdated('Holding removed');
+    loadPortfolio();
+    loadDashboard();
+  } catch(e) {
+    holdingsData = before;
+    renderHoldingsTable(holdingsData);
+    renderPortfolioCards(holdingsData);
+    alert(e.message || 'Could not remove holding.');
   }
-  await loadPortfolio();
-  await loadDashboard();
-  setLastUpdated('Holding removed');
 }
 
 
@@ -2680,6 +2717,8 @@ async function confirmSell() {
     if (!r.ok) throw new Error(d.error || 'Sell failed');
     closeSellModal();
     await loadPortfolio();
+    loadDashboard();
+    setLastUpdated('Holding sold');
   } catch(err) {
     document.getElementById('sell-error').textContent = err.message || 'Network error — try again';
   } finally {
@@ -2713,6 +2752,8 @@ async function confirmEdit() {
   if (r.ok) {
     closeEditModal();
     await loadPortfolio();
+    loadDashboard();
+    setLastUpdated('Holding updated');
   }
 }
 

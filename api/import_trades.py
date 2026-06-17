@@ -26,10 +26,11 @@ def _safe_float(value, default: float = 0.0) -> float:
 
 def _clean_symbol(symbol: object) -> str:
     text = '' if symbol is None else str(symbol).strip().upper()
-    for suffix in ('.NS', '.BO'):
+    text = text.replace('NSE:', '').replace('BSE:', '').replace('NSE_', '').replace('BSE_', '')
+    for suffix in ('.NS', '.BO', '-EQ', ' EQ'):
         if text.endswith(suffix):
             text = text[:-len(suffix)]
-    return text
+    return text.strip()
 
 
 def _date_key(value: object):

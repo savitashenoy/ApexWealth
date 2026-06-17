@@ -907,6 +907,52 @@ def fetch_quote(symbol):
         return None
 
 
+
+
+def fetch_quotes_batch(symbols):
+    """Batch quote helper for Portfolio screens.
+
+    The old holdings endpoint called fetch_quote() one row at a time, which made
+    Add/Edit/Sell/Delete feel slow because the frontend reloads the whole table
+    after each action. This helper performs one yfinance batch lookup and returns
+    app-symbol keyed quote dicts. Individual fetch_quote() remains as fallback.
+    """
+    clean_symbols = []
+    seen = set()
+    for sym in symbols or []:
+        clean = _plain_symbol(sym)
+        if clean and clean not in seen:
+            clean_symbols.append(clean)
+            seen.add(clean)
+    out = {}
+    if not clean_symbols:
+        return out
+    try:
+        qmap = _yahoo_quotes(clean_symbols, use_cache=True)
+        for clean in clean_symbols:
+            item = qmap.get(_yf_symbol(clean)) or qmap.get(clean)
+            if not item:
+                continue
+            ltp = _safe_float(item.get('regularMarketPrice'))
+            prev = _safe_float(item.get('regularMarketPreviousClose')) or ltp
+            if ltp is None:
+                continue
+            chg_pct = _safe_float(item.get('regularMarketChangePercent'))
+            if chg_pct is None:
+                chg_pct = ((ltp - prev) / prev * 100) if prev else 0
+            out[clean] = {
+                'symbol': clean,
+                'ltp': round(ltp, 2),
+                'prev_close': round(prev if prev is not None else ltp, 2),
+                'day_high': round(_safe_float(item.get('regularMarketDayHigh')) or ltp, 2),
+                'day_low': round(_safe_float(item.get('regularMarketDayLow')) or ltp, 2),
+                'volume': _safe_int(item.get('regularMarketVolume')),
+                'day_chg_pct': round(chg_pct, 2),
+            }
+    except Exception:
+        out = {}
+    return out
+
 def fetch_return_profile(symbol, quote=None):
     """Return percentage changes for 1D, 1W, 1M and 1Y for a symbol."""
     returns = {'ret_1d': 0, 'ret_1w': 0, 'ret_1m': 0, 'ret_1y': 0}
@@ -979,7 +1025,19 @@ def _yf_symbol(symbol):
 
 
 def _plain_symbol(symbol):
-    return str(symbol or '').upper().replace('.NS', '').replace('.BO', '').strip()
+    # Robust plain app symbol used for Yahoo and matching. Handles imported broker
+    # formats such as NSE:RELIANCE, RELIANCE-EQ, RELIANCE.NS and encoded symbols.
+    try:
+        sym = _strip_exchange_suffix(symbol)
+    except Exception:
+        sym = str(symbol or '').upper().replace('.NS', '').replace('.BO', '').strip()
+    for prefix in ('NSE:', 'BSE:', 'NSE_', 'BSE_'):
+        if sym.startswith(prefix):
+            sym = sym[len(prefix):]
+    for suffix in ('-EQ', ' EQ'):
+        if sym.endswith(suffix):
+            sym = sym[:-len(suffix)]
+    return sym.strip()
 
 
 def _yf_safe_val(val, default=None):
@@ -1136,7 +1194,7 @@ def fetch_quote(symbol):
     if not sym:
         return None
     try:
-        qmap = _yahoo_quotes([sym], use_cache=False)
+        qmap = _yahoo_quotes([sym], use_cache=True)
         item = qmap.get(_yf_symbol(sym))
         if not item:
             return None
@@ -1315,20 +1373,23 @@ def get_holdings(user_id):
         portfolios = load_json(PORTFOLIOS_FILE)
         holdings = portfolios.get(user_id, [])
     enriched = []
+    quote_map = fetch_quotes_batch([h.get('symbol') for h in holdings])
     for h in holdings:
-        q = fetch_quote(h['symbol'])
+        clean_symbol = _plain_symbol(h.get('symbol'))
+        q = quote_map.get(clean_symbol) or fetch_quote(h.get('symbol'))
+        invested = float(h.get('buy_price', 0)) * float(h.get('qty', 0))
         if q:
             ltp = q['ltp']
-            invested = h['buy_price'] * h['qty']
-            curr_val = ltp * h['qty']
+            curr_val = ltp * float(h.get('qty', 0))
             pnl = curr_val - invested
             pnl_pct = (pnl / invested * 100) if invested else 0
-            enriched.append({**h, 'ltp': ltp, 'day_chg_pct': q['day_chg_pct'],
+            enriched.append({**h, 'symbol': clean_symbol or h.get('symbol'), 'ltp': ltp, 'quote_ok': True, 'day_chg_pct': q.get('day_chg_pct', 0),
                               'invested': round(invested, 2), 'curr_value': round(curr_val, 2),
                               'pnl': round(pnl, 2), 'pnl_pct': round(pnl_pct, 2)})
         else:
-            invested = h['buy_price'] * h['qty']
-            enriched.append({**h, 'ltp': h['buy_price'], 'day_chg_pct': 0,
+            # Do not display buy price as LTP when Yahoo has no quote. Showing the
+            # buy price made imported rows look falsely live. Keep totals conservative.
+            enriched.append({**h, 'symbol': clean_symbol or h.get('symbol'), 'ltp': None, 'quote_ok': False, 'day_chg_pct': 0,
                               'invested': round(invested, 2), 'curr_value': round(invested, 2),
                               'pnl': 0, 'pnl_pct': 0})
     return jsonify(enriched)
@@ -1338,7 +1399,7 @@ def add_holding(user_id):
     data = get_request_json()
     holding = {
         'id': str(uuid.uuid4()),
-        'symbol': data['symbol'].upper(),
+        'symbol': _plain_symbol(data['symbol']),
         'name': data.get('name', data['symbol']),
         'buy_price': float(data['buy_price']),
         'qty': float(data['qty']),
