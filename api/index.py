@@ -21,10 +21,30 @@ except Exception:
     from broker_normalizer import normalize_file, BROKER_HINTS
     from import_trades import match_fifo_to_apex, holding_key, trade_key
 
-try:
-    from .weighted_index_data import nifty50_data, banknifty_data, sensex_data
-except Exception:
-    from weighted_index_data import nifty50_data, banknifty_data, sensex_data
+# Pullers/Draggers market page data is optional for auth/core APIs.
+# On Vercel, api/index.py may be imported as a standalone function module,
+# so normal relative imports can fail before Flask can return JSON. Keep this
+# import fully guarded so login/signup never fail because Markets data failed.
+def _load_weighted_index_data_safe():
+    try:
+        from .weighted_index_data import nifty50_data, banknifty_data, sensex_data
+        return nifty50_data, banknifty_data, sensex_data, None
+    except Exception as e1:
+        try:
+            from weighted_index_data import nifty50_data, banknifty_data, sensex_data
+            return nifty50_data, banknifty_data, sensex_data, None
+        except Exception as e2:
+            try:
+                import importlib.util
+                module_path = os.path.join(os.path.dirname(__file__), 'weighted_index_data.py')
+                spec = importlib.util.spec_from_file_location('weighted_index_data_safe', module_path)
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                return mod.nifty50_data, mod.banknifty_data, mod.sensex_data, None
+            except Exception as e3:
+                return [], [], [], f'{e1}; {e2}; {e3}'
+
+nifty50_data, banknifty_data, sensex_data, WEIGHTED_INDEX_DATA_ERROR = _load_weighted_index_data_safe()
 
 try:
     import psycopg
@@ -633,7 +653,7 @@ def get_request_json():
 def validate_persistent_storage_config():
     # On Vercel, a malformed DATABASE_URL should fail loudly as JSON instead of
     # silently falling back to ephemeral /tmp JSON storage.
-    if not request.path.startswith('/api/') or request.path == '/api/health/storage':
+    if not request.path.startswith('/api/') or request.path in ('/api/health/storage', '/api/health/startup'):
         return None
     if os.environ.get('VERCEL') and RAW_DATABASE_URL and DATABASE_URL_ERROR:
         return jsonify({
@@ -1345,6 +1365,22 @@ def health_storage():
         payload['fix'] = 'Replace the placeholder DATABASE_URL in Vercel with the exact Neon pooled connection string and redeploy.'
         payload['example_shape'] = 'postgresql://USER:PASSWORD@ep-xxxxx-pooler.REGION.aws.neon.tech/DBNAME?sslmode=require'
     return jsonify(payload)
+
+
+@app.route('/api/health/startup')
+def health_startup():
+    return jsonify({
+        'ok': True,
+        'app': 'ApexWealth',
+        'weighted_index_rows': {
+            'nifty': len(nifty50_data or []),
+            'banknifty': len(banknifty_data or []),
+            'sensex': len(sensex_data or [])
+        },
+        'weighted_index_data_error': WEIGHTED_INDEX_DATA_ERROR,
+        'vercel': bool(os.environ.get('VERCEL')),
+        **db_status_payload()
+    })
 
 # ─── AUTH ─────────────────────────────────────────────────────────────────────
 
