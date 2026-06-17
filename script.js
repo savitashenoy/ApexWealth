@@ -375,22 +375,9 @@ function renderDashCharts(holdings) {
   const invested = holdings.map(h => Number(h.invested || (h.buy_price * h.qty) || 0));
   const currVals = holdings.map(h => Number(h.curr_value || 0));
 
-  // Bar chart - invested vs current
-  const ctx1 = document.getElementById('dash-bar-chart')?.getContext('2d');
-  if (ctx1) {
-    if (dashBarChart) dashBarChart.destroy();
-    dashBarChart = new Chart(ctx1, {
-      type: 'bar',
-      data: {
-        labels,
-        datasets: [
-          {label:'Invested',data:invested,backgroundColor:'rgba(80,140,255,0.5)',borderColor:'#508cff',borderWidth:1},
-          {label:'Current Value',data:currVals,backgroundColor:'rgba(0,200,150,0.5)',borderColor:'#00c896',borderWidth:1}
-        ]
-      },
-      options: chartOpts('₹')
-    });
-  }
+  // Top 5 gainers and losers in portfolio holdings
+  renderPortfolioTopMovers(holdings);
+  if (dashBarChart) { dashBarChart.destroy(); dashBarChart = null; }
 
   // Portfolio allocation by percentage of invested value
   const totalInvested = invested.reduce((a,b) => a + b, 0);
@@ -1023,18 +1010,25 @@ async function loadTrades() {
   `).join('');
 
   // Cumulative P&L chart
-  let cum = 0;
-  const cumData = trades.map(t => { cum += t.pnl; return cum; });
-  const ctx = document.getElementById('perf-cumulative-chart').getContext('2d');
-  if (perfCumulativeChart) perfCumulativeChart.destroy();
-  perfCumulativeChart = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: trades.map(t => t.sell_date),
-      datasets: [{label:'Cumulative P&L (₹)',data:cumData,borderColor:'#00c896',backgroundColor:'rgba(0,200,150,0.08)',fill:true,tension:.4,pointRadius:4,pointBackgroundColor:'#00c896'}]
-    },
-    options: chartOpts('₹')
-  });
+  try {
+    let cum = 0;
+    const cumData = trades.map(t => { cum += Number(t.pnl || 0); return cum; });
+    const canvas = document.getElementById('perf-cumulative-chart');
+    const ctx = canvas ? canvas.getContext('2d') : null;
+    if (ctx) {
+      if (perfCumulativeChart) perfCumulativeChart.destroy();
+      perfCumulativeChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: trades.map(t => t.sell_date),
+          datasets: [{label:'Cumulative P&L (₹)',data:cumData,borderColor:'#00c896',backgroundColor:'rgba(0,200,150,0.08)',fill:true,tension:.4,pointRadius:4,pointBackgroundColor:'#00c896'}]
+        },
+        options: chartOpts('₹')
+      });
+    }
+  } catch(chartErr) { console.warn('Performance chart render failed', chartErr); }
+  setPortfolioLoadProgress('trades', 100, 'Performance report loaded', true);
+  hidePortfolioLoadProgress('trades');
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -2064,6 +2058,26 @@ function doughnutOpts() {
       tooltip: {backgroundColor: t.tooltipBg, borderColor: t.tooltipBorder, borderWidth: 1, titleColor: t.tooltipTitle, bodyColor: t.tooltipBody}
     }
   };
+}
+
+
+function renderPortfolioTopMovers(holdings) {
+  const gainersBody = document.getElementById('portfolio-gainers-tbody');
+  const losersBody = document.getElementById('portfolio-losers-tbody');
+  if (!gainersBody || !losersBody) return;
+  const rows = (holdings || []).map(h => ({
+    symbol: h.symbol || '—',
+    chg: Number(h.day_chg_pct || 0)
+  })).filter(r => Number.isFinite(r.chg));
+  const gainers = rows.filter(r => r.chg > 0).sort((a,b) => b.chg - a.chg).slice(0, 5);
+  const losers = rows.filter(r => r.chg < 0).sort((a,b) => a.chg - b.chg).slice(0, 5);
+  const empty = '<tr><td colspan="2">—</td></tr>';
+  gainersBody.innerHTML = gainers.length ? gainers.map(r => `
+    <tr><td>${escapeHtml(r.symbol)}</td><td class="mover-up">${r.chg.toFixed(2)}</td></tr>
+  `).join('') : empty;
+  losersBody.innerHTML = losers.length ? losers.map(r => `
+    <tr><td>${escapeHtml(r.symbol)}</td><td class="mover-down">${r.chg.toFixed(2)}</td></tr>
+  `).join('') : empty;
 }
 
 function dashboardAllocationDoughnutOpts(totalInvested) {
