@@ -494,6 +494,15 @@ def db_add_trade(user_id, trade):
             cur.execute('INSERT INTO trades (id, user_id, symbol, name, buy_price, sell_price, qty, buy_date, sell_date, pnl, pnl_pct) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)', (trade['id'], user_id, trade['symbol'], trade.get('name'), trade['buy_price'], trade['sell_price'], trade['qty'], trade.get('buy_date'), trade.get('sell_date'), trade['pnl'], trade['pnl_pct']))
     return trade
 
+
+def db_delete_trade(user_id, trade_id):
+    if not init_db():
+        return None
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute('DELETE FROM trades WHERE user_id=%s AND id=%s', (user_id, trade_id))
+            return cur.rowcount
+
 def db_get_portfolio_alerts(user_id):
     if not init_db():
         return None
@@ -1980,6 +1989,22 @@ def get_trades(user_id):
         trades = load_json(TRADES_FILE)
         items = trades.get(user_id, [])
     return jsonify(items)
+
+
+@app.route('/api/trades/<user_id>/<trade_id>', methods=['DELETE'])
+@app.route('/api/trades/<user_id>/<trade_id>/delete', methods=['POST'])
+def delete_trade(user_id, trade_id):
+    if db_configured():
+        removed = db_delete_trade(user_id, trade_id)
+        if removed is None:
+            return jsonify({'error': DB_LAST_ERROR or 'Database unavailable'}), 500
+        return jsonify({'message': 'Trade deleted', 'removed': removed, 'storage': 'neon'})
+    trades = load_json(TRADES_FILE)
+    current = trades.get(user_id, [])
+    before = len(current)
+    trades[user_id] = [t for t in current if str(t.get('id')) != str(trade_id)]
+    save_json(TRADES_FILE, trades)
+    return jsonify({'message': 'Trade deleted', 'removed': before - len(trades[user_id]), 'storage': 'json-fallback'})
 
 # ─── MARKET DATA ──────────────────────────────────────────────────────────────
 

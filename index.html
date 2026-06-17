@@ -221,17 +221,29 @@ body {
 }
 .nav-logout:hover { border-color: var(--red); color: var(--red); background: rgba(255,82,82,.08); }
 
-/* MARKET TICKER */
-.market-ticker {
+/* MARKET TICKER / PAGE HEADER */
+.app-top-header {
   background: rgba(0,0,0,0.25); border-bottom: 1px solid var(--border);
-  padding: 8px 24px; display: flex; gap: 28px; overflow: hidden;
-  font-size: .72rem; font-family: 'JetBrains Mono', monospace; white-space: nowrap; flex-shrink: 0;
+  padding: 0 18px 0 24px; display:flex; align-items:center; gap:18px; min-height:38px;
+  flex-shrink:0;
+}
+.market-ticker {
+  flex:1; min-width:0; padding: 8px 0; display: flex; gap: 28px; overflow: hidden;
+  font-size: .845rem; font-family: 'JetBrains Mono', monospace; white-space: nowrap;
 }
 .ticker-item { display: flex; gap: 6px; align-items: center; }
-.ticker-sym { color: var(--dim); }
-.ticker-val { color: var(--text-secondary); }
+.ticker-sym { color: var(--dim); font-size:.845rem; }
+.ticker-val { color: var(--text-secondary); font-size:.845rem; }
+.ticker-chg { font-size:.845rem; }
 .ticker-chg.up { color: var(--green); }
 .ticker-chg.dn { color: var(--red); }
+.app-top-status { margin-left:auto; flex:0 0 auto; display:flex; justify-content:flex-end; align-items:center; }
+.last-update-badge { display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border); border-radius:999px; padding:5px 10px; background:var(--card); color:var(--text-secondary); font-family:'JetBrains Mono', monospace; font-size:.74rem; font-weight:800; white-space:nowrap; }
+th.sortable-th { cursor:pointer; user-select:none; position:relative; white-space:nowrap; }
+th.sortable-th:hover { color:var(--accent); }
+th.sortable-th::after { content:' ↕'; color:var(--dim); font-size:.72em; }
+th.sortable-th.sort-asc::after { content:' ▲'; color:var(--accent); }
+th.sortable-th.sort-desc::after { content:' ▼'; color:var(--accent); }
 
 /* MAIN CONTENT */
 .main { flex: 1; overflow-y: auto; padding: 20px 24px; }
@@ -839,7 +851,8 @@ body.light .autocomplete-list { box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
 body.light .sidebar { background: linear-gradient(180deg, #edeae2 0%, #e4e0d6 100%); box-shadow: 12px 0 30px rgba(0,0,0,.06); }
 body.light .app-shell,
 body.light .main { background: var(--bg); }
-body.light .market-ticker { background: #ede9df; }
+body.light .app-top-header { background: #ede9df; }
+body.light .last-update-badge { background:#f5f2eb; color:#5c574f; border-color:#d6d0c6; }
 body.light .disclaimer-footer { background: rgba(237,234,226,.96); border-top-color: var(--border); }
 body.light .nav-page-btn:hover { background: #e8e4da; }
 body.light .nav-page-btn.active { color: var(--accent); background: rgba(42,100,150,0.1); border-color: rgba(42,100,150,0.3); box-shadow: inset 3px 0 0 var(--accent); }
@@ -1196,10 +1209,12 @@ body.light .screener-card, body.light .screener-tab-btn { background:#f5f2eb; }
   </aside>
 
   <div class="app-shell">
-    <div class="app-top-status"><span class="last-update-badge" id="last-update-display">Last update: —</span></div>
-    <!-- MARKET TICKER -->
-    <div class="market-ticker" id="market-ticker">
-      <div class="ticker-item"><span class="ticker-sym">Loading market data…</span></div>
+    <div class="app-top-header">
+      <!-- MARKET TICKER -->
+      <div class="market-ticker" id="market-ticker">
+        <div class="ticker-item"><span class="ticker-sym">Loading market data…</span></div>
+      </div>
+      <div class="app-top-status"><span class="last-update-badge" id="last-update-display">Last update: —</span></div>
     </div>
 
     <div class="main">
@@ -1323,9 +1338,9 @@ body.light .screener-card, body.light .screener-tab-btn { background:#f5f2eb; }
           <table>
             <thead>
               <tr>
-                <th>Date</th><th>Ticker</th><th>Buy Price (₹)</th><th>Qty</th>
-                <th>LTP (₹)</th><th>Invested (₹)</th><th>Curr. Value (₹)</th>
-                <th>P&L (₹)</th><th>P&L (%)</th><th>Day Chng %</th><th>Action</th>
+                <th class="sortable-th" data-sort-table="holdings" data-sort-key="date" onclick="sortTable('holdings','date')">Date</th><th class="sortable-th" data-sort-table="holdings" data-sort-key="symbol" onclick="sortTable('holdings','symbol')">Ticker</th><th class="sortable-th" data-sort-table="holdings" data-sort-key="buy_price" onclick="sortTable('holdings','buy_price')">Buy Price (₹)</th><th class="sortable-th" data-sort-table="holdings" data-sort-key="qty" onclick="sortTable('holdings','qty')">Qty</th>
+                <th class="sortable-th" data-sort-table="holdings" data-sort-key="ltp" onclick="sortTable('holdings','ltp')">LTP (₹)</th><th class="sortable-th" data-sort-table="holdings" data-sort-key="invested" onclick="sortTable('holdings','invested')">Invested (₹)</th><th class="sortable-th" data-sort-table="holdings" data-sort-key="curr_value" onclick="sortTable('holdings','curr_value')">Curr. Value (₹)</th>
+                <th class="sortable-th" data-sort-table="holdings" data-sort-key="pnl" onclick="sortTable('holdings','pnl')">P&L (₹)</th><th class="sortable-th" data-sort-table="holdings" data-sort-key="pnl_pct" onclick="sortTable('holdings','pnl_pct')">P&L (%)</th><th class="sortable-th" data-sort-table="holdings" data-sort-key="day_chg_pct" onclick="sortTable('holdings','day_chg_pct')">Day Chng %</th><th>Action</th>
               </tr>
             </thead>
             <tbody id="holdings-tbody">
@@ -1373,10 +1388,10 @@ body.light .screener-card, body.light .screener-tab-btn { background:#f5f2eb; }
         <div class="table-wrap">
           <table>
             <thead>
-              <tr><th>Symbol</th><th>Qty</th><th>Buy Price</th><th>Sell Price</th><th>Buy Date</th><th>Sell Date</th><th>P&L (₹)</th><th>P&L (%)</th></tr>
+              <tr><th class="sortable-th" data-sort-table="trades" data-sort-key="symbol" onclick="sortTable('trades','symbol')">Symbol</th><th class="sortable-th" data-sort-table="trades" data-sort-key="qty" onclick="sortTable('trades','qty')">Qty</th><th class="sortable-th" data-sort-table="trades" data-sort-key="buy_price" onclick="sortTable('trades','buy_price')">Buy Price</th><th class="sortable-th" data-sort-table="trades" data-sort-key="sell_price" onclick="sortTable('trades','sell_price')">Sell Price</th><th class="sortable-th" data-sort-table="trades" data-sort-key="buy_date" onclick="sortTable('trades','buy_date')">Buy Date</th><th class="sortable-th" data-sort-table="trades" data-sort-key="sell_date" onclick="sortTable('trades','sell_date')">Sell Date</th><th class="sortable-th" data-sort-table="trades" data-sort-key="pnl" onclick="sortTable('trades','pnl')">P&L (₹)</th><th class="sortable-th" data-sort-table="trades" data-sort-key="pnl_pct" onclick="sortTable('trades','pnl_pct')">P&L (%)</th><th>Action</th></tr>
             </thead>
             <tbody id="trades-tbody">
-              <tr><td colspan="8"><div class="empty-state"><i class="fa fa-history"></i><p>No completed trades yet</p></div></td></tr>
+              <tr><td colspan="9"><div class="empty-state"><i class="fa fa-history"></i><p>No completed trades yet</p></div></td></tr>
             </tbody>
           </table>
         </div>
@@ -1420,7 +1435,7 @@ body.light .screener-card, body.light .screener-tab-btn { background:#f5f2eb; }
       <div class="table-wrap">
         <table>
           <thead>
-            <tr><th>Symbol</th><th>Name</th><th>LTP (₹)</th><th>DayHigh</th><th>DayLow</th><th>Volume</th><th>Day Chg %</th><th>Action</th></tr>
+            <tr><th class="sortable-th" data-sort-table="watchlist" data-sort-key="symbol" onclick="sortTable('watchlist','symbol')">Symbol</th><th class="sortable-th" data-sort-table="watchlist" data-sort-key="name" onclick="sortTable('watchlist','name')">Name</th><th class="sortable-th" data-sort-table="watchlist" data-sort-key="ltp" onclick="sortTable('watchlist','ltp')">LTP (₹)</th><th class="sortable-th" data-sort-table="watchlist" data-sort-key="day_high" onclick="sortTable('watchlist','day_high')">DayHigh</th><th class="sortable-th" data-sort-table="watchlist" data-sort-key="day_low" onclick="sortTable('watchlist','day_low')">DayLow</th><th class="sortable-th" data-sort-table="watchlist" data-sort-key="volume" onclick="sortTable('watchlist','volume')">Volume</th><th class="sortable-th" data-sort-table="watchlist" data-sort-key="day_chg_pct" onclick="sortTable('watchlist','day_chg_pct')">Day Chg %</th><th>Action</th></tr>
           </thead>
           <tbody id="watchlist-tbody">
             <tr><td colspan="8"><div class="loading-overlay"><div class="spinner"></div> Loading…</div></td></tr>
@@ -1436,7 +1451,7 @@ body.light .screener-card, body.light .screener-tab-btn { background:#f5f2eb; }
         <div class="watchlist-heatmap-table-wrap">
           <table class="watchlist-heatmap-table">
             <thead>
-              <tr><th>Ticker</th><th>Name</th><th>1Day %</th><th>1Week %</th><th>1Month %</th><th>1Year %</th></tr>
+              <tr><th class="sortable-th" data-sort-table="heatmap" data-sort-key="symbol" onclick="sortTable('heatmap','symbol')">Ticker</th><th class="sortable-th" data-sort-table="heatmap" data-sort-key="name" onclick="sortTable('heatmap','name')">Name</th><th class="sortable-th" data-sort-table="heatmap" data-sort-key="ret_1d" onclick="sortTable('heatmap','ret_1d')">1Day %</th><th class="sortable-th" data-sort-table="heatmap" data-sort-key="ret_1w" onclick="sortTable('heatmap','ret_1w')">1Week %</th><th class="sortable-th" data-sort-table="heatmap" data-sort-key="ret_1m" onclick="sortTable('heatmap','ret_1m')">1Month %</th><th class="sortable-th" data-sort-table="heatmap" data-sort-key="ret_1y" onclick="sortTable('heatmap','ret_1y')">1Year %</th></tr>
             </thead>
             <tbody id="watchlist-heatmap-tbody">
               <tr><td colspan="6"><div class="loading-overlay"><div class="spinner"></div> Loading heat map…</div></td></tr>
@@ -1902,6 +1917,8 @@ const API = '/api';
 let USER = null;
 let TICKERS = [];
 let holdingsData = [];
+let tradesData = [];
+let tableSortState = {};
 let analysisTicker = null;
 let analysisPeriod = '1mo';
 let dashBarChart, dashAllocationChart;
@@ -1937,6 +1954,58 @@ function setLastUpdated(source = '') {
   lastUpdateSource = source || lastUpdateSource || 'Data';
   const el = document.getElementById('last-update-display');
   if (el) el.textContent = `Last update: ${formatISTTimestamp()}${lastUpdateSource ? ' · ' + lastUpdateSource : ''}`;
+}
+
+
+function normalizeSortValue(value) {
+  if (value === null || value === undefined || value === '') return '';
+  if (typeof value === 'number') return value;
+  const raw = String(value).trim();
+  const numeric = raw.replace(/[₹,%+\s,]/g, '').replace(/Cr$/i, '0000000').replace(/L$/i, '00000');
+  const n = Number(numeric);
+  if (Number.isFinite(n) && /[0-9]/.test(raw)) return n;
+  const d = Date.parse(raw);
+  if (!Number.isNaN(d) && /\d{4}|\d{1,2}[-/]/.test(raw)) return d;
+  return raw.toUpperCase();
+}
+
+function sortAccessor(table, row, key) {
+  if (!row) return '';
+  if (table === 'heatmap' && key === 'ret_1d') return row.ret_1d ?? row.day_chg_pct ?? 0;
+  return row[key];
+}
+
+function getSortedRows(table, rows) {
+  const state = tableSortState[table];
+  const list = Array.isArray(rows) ? [...rows] : [];
+  if (!state || !state.key) return list;
+  const dir = state.dir === 'asc' ? 1 : -1;
+  list.sort((a,b) => {
+    const av = normalizeSortValue(sortAccessor(table, a, state.key));
+    const bv = normalizeSortValue(sortAccessor(table, b, state.key));
+    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
+    return String(av).localeCompare(String(bv), undefined, {numeric:true, sensitivity:'base'}) * dir;
+  });
+  return list;
+}
+
+function updateSortHeaderClasses(table) {
+  const state = tableSortState[table] || {};
+  document.querySelectorAll(`th[data-sort-table="${table}"]`).forEach(th => {
+    th.classList.remove('sort-asc','sort-desc');
+    if (th.dataset.sortKey === state.key) th.classList.add(state.dir === 'asc' ? 'sort-asc' : 'sort-desc');
+  });
+}
+
+function sortTable(table, key) {
+  const current = tableSortState[table] || {};
+  const dir = current.key === key && current.dir === 'asc' ? 'desc' : 'asc';
+  tableSortState[table] = {key, dir};
+  if (table === 'holdings') renderHoldingsTable(holdingsData || []);
+  else if (table === 'trades') renderTradesTable(tradesData || []);
+  else if (table === 'watchlist') renderWatchlistItems(currentWatchlistItems || []);
+  else if (table === 'heatmap') renderWatchlistHeatmap(currentWatchlistItems || []);
+  updateSortHeaderClasses(table);
 }
 
 async function fetchJsonSafe(url, options = {}) {
@@ -2016,7 +2085,7 @@ function clearAppState() {
     'holdings-tbody':'<tr><td colspan="11"><div class="empty-state"><i class="fa fa-briefcase"></i><p>No holdings yet. Add your first position above.</p></div></td></tr>',
     'watchlist-tbody':'<tr><td colspan="8"><div class="empty-state"><i class="fa fa-star"></i><p>Your watchlist is empty.</p></div></td></tr>',
     'watchlist-heatmap-tbody':'<tr><td colspan="6"><div class="empty-state"><i class="fa fa-fire"></i><p>No watchlist data for heat map.</p></div></td></tr>',
-    'trades-tbody':'<tr><td colspan="8"><div class="empty-state"><i class="fa fa-history"></i><p>No completed trades yet</p></div></td></tr>'
+    'trades-tbody':'<tr><td colspan="9"><div class="empty-state"><i class="fa fa-history"></i><p>No completed trades yet</p></div></td></tr>'
   };
   Object.entries(tableClears).forEach(([id,html]) => { const el=document.getElementById(id); if(el) el.innerHTML=html; });
   const dashEmpty = document.getElementById('dashboard-empty-state');
@@ -2463,7 +2532,9 @@ function renderHoldingsTable(holdings) {
     tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state"><i class="fa fa-briefcase"></i><p>No holdings yet. Add your first position above.</p></div></td></tr>`;
     return;
   }
-  tbody.innerHTML = holdings.map(h => `
+  const rows = getSortedRows('holdings', holdings);
+  updateSortHeaderClasses('holdings');
+  tbody.innerHTML = rows.map(h => `
     <tr>
       <td class="td-mono">${h.date}</td>
       <td class="td-symbol">${h.symbol}</td>
@@ -2994,57 +3065,42 @@ function renderAllocationCharts() {
   }]},options:chartOpts('₹')}); }
 }
 
-async function loadTrades() {
+function resetPerformanceSummary() {
+  document.getElementById('perf-total-trades').textContent = 0;
+  document.getElementById('perf-realised').textContent = '₹0';
+  document.getElementById('perf-realised').className = 'card-value td-mono';
+  document.getElementById('perf-win-rate').textContent = '0%';
+  document.getElementById('perf-best').textContent = '₹0';
+}
+
+function renderTradesTable(trades) {
   const tbody = document.getElementById('trades-tbody');
-  setPortfolioLoadProgress('trades', 15, 'Fetching performance report…', true);
-  let trades = [];
-  try {
-    trades = await fetchJsonSafe(`${API}/trades/${USER.user_id}`, {cache:'no-store'});
-    setPortfolioLoadProgress('trades', 65, 'Rendering performance report…', true);
-  } catch(err) {
-    if (tbody) tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><i class="fa fa-triangle-exclamation"></i><p>${escapeHtml(err.message || 'Failed to load performance report')}</p></div></td></tr>`;
-    hidePortfolioLoadProgress('trades');
+  if (!tbody) return;
+  const rows = getSortedRows('trades', trades || []);
+  updateSortHeaderClasses('trades');
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state"><i class="fa fa-history"></i><p>No completed trades yet. Sell a holding to record a trade.</p></div></td></tr>`;
     return;
   }
-
-  if (!trades.length) {
-    tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><i class="fa fa-history"></i><p>No completed trades yet. Sell a holding to record a trade.</p></div></td></tr>`;
-    document.getElementById('perf-total-trades').textContent = 0;
-    document.getElementById('perf-realised').textContent = '₹0';
-    document.getElementById('perf-win-rate').textContent = '0%';
-    document.getElementById('perf-best').textContent = '₹0';
-    setPortfolioLoadProgress('trades', 100, 'Performance report loaded', true);
-    hidePortfolioLoadProgress('trades');
-    return;
-  }
-
-  const totalPnl = trades.reduce((s,t) => s+t.pnl, 0);
-  const wins = trades.filter(t => t.pnl > 0).length;
-  const best = Math.max(...trades.map(t => t.pnl));
-
-  document.getElementById('perf-total-trades').textContent = trades.length;
-  document.getElementById('perf-realised').textContent = `${totalPnl >= 0 ? '+' : ''}₹${fmtNum(totalPnl)}`;
-  document.getElementById('perf-realised').className = `card-value td-mono ${totalPnl >= 0 ? 'green' : 'red'}`;
-  document.getElementById('perf-win-rate').textContent = `${((wins/trades.length)*100).toFixed(0)}%`;
-  document.getElementById('perf-best').textContent = `₹${fmtNum(best)}`;
-
-  tbody.innerHTML = trades.map(t => `
+  tbody.innerHTML = rows.map(t => `
     <tr>
-      <td class="td-symbol">${t.symbol}</td>
+      <td class="td-symbol">${escapeHtml(t.symbol)}</td>
       <td class="td-mono">${t.qty}</td>
       <td class="td-mono">₹${t.buy_price}</td>
       <td class="td-mono">₹${t.sell_price}</td>
-      <td class="td-mono">${t.buy_date}</td>
-      <td class="td-mono">${t.sell_date}</td>
-      <td class="td-mono ${t.pnl >= 0 ? 'td-green' : 'td-red'}">${t.pnl >= 0 ? '+' : ''}₹${fmtNum(t.pnl)}</td>
-      <td><span class="badge ${t.pnl_pct >= 0 ? 'badge-green' : 'badge-red'}">${t.pnl_pct >= 0 ? '▲' : '▼'} ${Math.abs(t.pnl_pct)}%</span></td>
+      <td class="td-mono">${escapeHtml(t.buy_date || '')}</td>
+      <td class="td-mono">${escapeHtml(t.sell_date || '')}</td>
+      <td class="td-mono ${Number(t.pnl || 0) >= 0 ? 'td-green' : 'td-red'}">${Number(t.pnl || 0) >= 0 ? '+' : ''}₹${fmtNum(Number(t.pnl || 0))}</td>
+      <td><span class="badge ${Number(t.pnl_pct || 0) >= 0 ? 'badge-green' : 'badge-red'}">${Number(t.pnl_pct || 0) >= 0 ? '▲' : '▼'} ${Math.abs(Number(t.pnl_pct || 0))}%</span></td>
+      <td><div class="action-icons"><button class="action-btn del" title="Delete trade" onclick="deleteTrade('${encodeURIComponent(t.id)}', event)"><i class="fa fa-trash"></i></button></div></td>
     </tr>
   `).join('');
+}
 
-  // Cumulative P&L chart
+function renderPerformanceChart(trades) {
   try {
     let cum = 0;
-    const cumData = trades.map(t => { cum += Number(t.pnl || 0); return cum; });
+    const cumData = (trades || []).map(t => { cum += Number(t.pnl || 0); return cum; });
     const canvas = document.getElementById('perf-cumulative-chart');
     const ctx = canvas ? canvas.getContext('2d') : null;
     if (ctx) {
@@ -3052,16 +3108,78 @@ async function loadTrades() {
       perfCumulativeChart = new Chart(ctx, {
         type: 'line',
         data: {
-          labels: trades.map(t => t.sell_date),
+          labels: (trades || []).map(t => t.sell_date),
           datasets: [{label:'Cumulative P&L (₹)',data:cumData,borderColor:'#00c896',backgroundColor:'rgba(0,200,150,0.08)',fill:true,tension:.4,pointRadius:4,pointBackgroundColor:'#00c896'}]
         },
         options: chartOpts('₹')
       });
     }
   } catch(chartErr) { console.warn('Performance chart render failed', chartErr); }
-  setPortfolioLoadProgress('trades', 100, 'Performance report loaded', true);
-  hidePortfolioLoadProgress('trades');
 }
+
+async function loadTrades() {
+  const tbody = document.getElementById('trades-tbody');
+  setPortfolioLoadProgress('trades', 15, 'Fetching performance report…', true);
+  try {
+    const trades = await fetchJsonSafe(`${API}/trades/${USER.user_id}`, {cache:'no-store'});
+    tradesData = Array.isArray(trades) ? trades : [];
+    setPortfolioLoadProgress('trades', 65, 'Rendering performance report…', true);
+
+    if (!tradesData.length) {
+      resetPerformanceSummary();
+      renderTradesTable([]);
+      renderPerformanceChart([]);
+      setPortfolioLoadProgress('trades', 100, 'Performance report loaded', true);
+      hidePortfolioLoadProgress('trades');
+      return;
+    }
+
+    const totalPnl = tradesData.reduce((s,t) => s + Number(t.pnl || 0), 0);
+    const wins = tradesData.filter(t => Number(t.pnl || 0) > 0).length;
+    const best = Math.max(...tradesData.map(t => Number(t.pnl || 0)));
+
+    document.getElementById('perf-total-trades').textContent = tradesData.length;
+    document.getElementById('perf-realised').textContent = `${totalPnl >= 0 ? '+' : ''}₹${fmtNum(totalPnl)}`;
+    document.getElementById('perf-realised').className = `card-value td-mono ${totalPnl >= 0 ? 'green' : 'red'}`;
+    document.getElementById('perf-win-rate').textContent = `${((wins/tradesData.length)*100).toFixed(0)}%`;
+    document.getElementById('perf-best').textContent = `₹${fmtNum(best)}`;
+
+    renderTradesTable(tradesData);
+    renderPerformanceChart(tradesData);
+    setPortfolioLoadProgress('trades', 100, 'Performance report loaded', true);
+    hidePortfolioLoadProgress('trades');
+  } catch(err) {
+    if (tbody) tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state"><i class="fa fa-triangle-exclamation"></i><p>${escapeHtml(err.message || 'Failed to load performance report')}</p></div></td></tr>`;
+    hidePortfolioLoadProgress('trades');
+  }
+}
+
+async function deleteTrade(encodedId, ev) {
+  if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+  const tradeId = decodeURIComponent(encodedId || '');
+  if (!USER || !tradeId) return;
+  if (!confirm('Delete this performance report row?')) return;
+  const previous = [...(tradesData || [])];
+  tradesData = (tradesData || []).filter(t => String(t.id) !== String(tradeId));
+  renderTradesTable(tradesData);
+  renderPerformanceChart(tradesData);
+  try {
+    await fetchJsonSafe(`${API}/trades/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(tradeId)}`, {method:'DELETE', cache:'no-store'});
+  } catch(err) {
+    try {
+      await fetchJsonSafe(`${API}/trades/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(tradeId)}/delete`, {method:'POST', cache:'no-store'});
+    } catch(e) {
+      tradesData = previous;
+      renderTradesTable(tradesData);
+      renderPerformanceChart(tradesData);
+      alert(e.message || err.message || 'Could not delete trade.');
+      return;
+    }
+  }
+  await loadTrades();
+  setLastUpdated('Trade deleted');
+}
+
 
 // ──────────────────────────────────────────────────────────────────────────────
 // WATCHLIST
@@ -3358,7 +3476,9 @@ function renderWatchlistItems(items) {
     renderWatchlistHeatmap([]);
     return;
   }
-  tbody.innerHTML = items.map(item => `
+  const rows = getSortedRows('watchlist', items);
+  updateSortHeaderClasses('watchlist');
+  tbody.innerHTML = rows.map(item => `
     <tr data-watch-symbol="${escapeHtml(item.symbol)}">
       <td class="td-symbol"><a href="${tradingViewUrl(item.symbol)}" target="_blank" rel="noopener noreferrer" title="Open in TradingView">${escapeHtml(item.symbol)}</a></td>
       <td>${escapeHtml(item.name || '—')}</td>
@@ -3406,7 +3526,9 @@ function renderWatchlistHeatmap(items) {
     tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><i class="fa fa-fire"></i><p>No watchlist data for heat map.</p></div></td></tr>`;
     return;
   }
-  tbody.innerHTML = items.map(item => `
+  const rows = getSortedRows('heatmap', items);
+  updateSortHeaderClasses('heatmap');
+  tbody.innerHTML = rows.map(item => `
     <tr>
       <td class="hm-ticker"><a href="${tradingViewUrl(item.symbol)}" target="_blank" rel="noopener noreferrer" title="Open in TradingView">${escapeHtml(item.symbol)}</a></td>
       <td class="hm-name">${escapeHtml(item.name || item.symbol)}</td>

@@ -1,4 +1,3 @@
-
 // ──────────────────────────────────────────────────────────────────────────────
 // CONFIG
 // ──────────────────────────────────────────────────────────────────────────────
@@ -6,6 +5,8 @@ const API = '/api';
 let USER = null;
 let TICKERS = [];
 let holdingsData = [];
+let tradesData = [];
+let tableSortState = {};
 let analysisTicker = null;
 let analysisPeriod = '1mo';
 let dashBarChart, dashAllocationChart;
@@ -16,7 +17,6 @@ let activeAnalysisTab = 'technicals';
 let perfCumulativeChart;
 let watchlistPortfolioItem = null;
 let portfolioAlerts = [];
-let portfolioAlertDismissedIds = new Set();
 let watchlistGroups = ['Default'];
 let activeWatchlistGroup = 'Default';
 let watchlistGroupOwnerId = null;
@@ -42,6 +42,58 @@ function setLastUpdated(source = '') {
   lastUpdateSource = source || lastUpdateSource || 'Data';
   const el = document.getElementById('last-update-display');
   if (el) el.textContent = `Last update: ${formatISTTimestamp()}${lastUpdateSource ? ' · ' + lastUpdateSource : ''}`;
+}
+
+
+function normalizeSortValue(value) {
+  if (value === null || value === undefined || value === '') return '';
+  if (typeof value === 'number') return value;
+  const raw = String(value).trim();
+  const numeric = raw.replace(/[₹,%+\s,]/g, '').replace(/Cr$/i, '0000000').replace(/L$/i, '00000');
+  const n = Number(numeric);
+  if (Number.isFinite(n) && /[0-9]/.test(raw)) return n;
+  const d = Date.parse(raw);
+  if (!Number.isNaN(d) && /\d{4}|\d{1,2}[-/]/.test(raw)) return d;
+  return raw.toUpperCase();
+}
+
+function sortAccessor(table, row, key) {
+  if (!row) return '';
+  if (table === 'heatmap' && key === 'ret_1d') return row.ret_1d ?? row.day_chg_pct ?? 0;
+  return row[key];
+}
+
+function getSortedRows(table, rows) {
+  const state = tableSortState[table];
+  const list = Array.isArray(rows) ? [...rows] : [];
+  if (!state || !state.key) return list;
+  const dir = state.dir === 'asc' ? 1 : -1;
+  list.sort((a,b) => {
+    const av = normalizeSortValue(sortAccessor(table, a, state.key));
+    const bv = normalizeSortValue(sortAccessor(table, b, state.key));
+    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
+    return String(av).localeCompare(String(bv), undefined, {numeric:true, sensitivity:'base'}) * dir;
+  });
+  return list;
+}
+
+function updateSortHeaderClasses(table) {
+  const state = tableSortState[table] || {};
+  document.querySelectorAll(`th[data-sort-table="${table}"]`).forEach(th => {
+    th.classList.remove('sort-asc','sort-desc');
+    if (th.dataset.sortKey === state.key) th.classList.add(state.dir === 'asc' ? 'sort-asc' : 'sort-desc');
+  });
+}
+
+function sortTable(table, key) {
+  const current = tableSortState[table] || {};
+  const dir = current.key === key && current.dir === 'asc' ? 'desc' : 'asc';
+  tableSortState[table] = {key, dir};
+  if (table === 'holdings') renderHoldingsTable(holdingsData || []);
+  else if (table === 'trades') renderTradesTable(tradesData || []);
+  else if (table === 'watchlist') renderWatchlistItems(currentWatchlistItems || []);
+  else if (table === 'heatmap') renderWatchlistHeatmap(currentWatchlistItems || []);
+  updateSortHeaderClasses(table);
 }
 
 async function fetchJsonSafe(url, options = {}) {
@@ -121,7 +173,7 @@ function clearAppState() {
     'holdings-tbody':'<tr><td colspan="11"><div class="empty-state"><i class="fa fa-briefcase"></i><p>No holdings yet. Add your first position above.</p></div></td></tr>',
     'watchlist-tbody':'<tr><td colspan="8"><div class="empty-state"><i class="fa fa-star"></i><p>Your watchlist is empty.</p></div></td></tr>',
     'watchlist-heatmap-tbody':'<tr><td colspan="6"><div class="empty-state"><i class="fa fa-fire"></i><p>No watchlist data for heat map.</p></div></td></tr>',
-    'trades-tbody':'<tr><td colspan="8"><div class="empty-state"><i class="fa fa-history"></i><p>No completed trades yet</p></div></td></tr>'
+    'trades-tbody':'<tr><td colspan="9"><div class="empty-state"><i class="fa fa-history"></i><p>No completed trades yet</p></div></td></tr>'
   };
   Object.entries(tableClears).forEach(([id,html]) => { const el=document.getElementById(id); if(el) el.innerHTML=html; });
   const dashEmpty = document.getElementById('dashboard-empty-state');
@@ -292,7 +344,7 @@ function doLogout() {
 async function showPage(name) {
   document.querySelectorAll('.nav-page-btn').forEach((b,i) => {
     b.classList.remove('active');
-    if (['dashboard','portfolio','watchlist','analysis','markets','screener'][i] === name) b.classList.add('active');
+    if (['dashboard','portfolio','watchlist','analysis','markets','screener','settings'][i] === name) b.classList.add('active');
   });
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.getElementById(`page-${name}`).classList.add('active');
@@ -305,6 +357,7 @@ async function loadPage(name) {
   else if (name === 'watchlist') await loadWatchlist();
   else if (name === 'markets') await loadMarkets();
   else if (name === 'screener') await screenerInit();
+  else if (name === 'settings') await loadSettings();
   else if (name === 'analysis') { if (analysisTicker) await loadAnalysisSequence(); }
 }
 
@@ -437,21 +490,113 @@ function renderDashCharts(holdings) {
   }
 }
 
+
+function moneyOrDash(value, prefix='₹') {
+  if (value === null || value === undefined || value === '' || Number.isNaN(Number(value))) return '—';
+  return `${prefix}${fmtNum(Number(value))}`;
+}
+
+async function runWatchlistAlertChecksForPortfolioRefresh() {
+  if (!USER || !(portfolioAlerts || []).some(a => !a.triggered_at && a.active !== false && ((a.source || (a.holding_id ? 'portfolio' : 'watchlist')) === 'watchlist'))) return;
+  let items = Array.isArray(currentWatchlistItems) ? currentWatchlistItems : [];
+  if (!items.length) {
+    try {
+      const group = getSelectedWatchlistGroup();
+      items = await fetchJsonSafe(`${API}/watchlist/${encodeURIComponent(USER.user_id)}?group=${encodeURIComponent(group)}`, {cache:'no-store'});
+      if (Array.isArray(items)) currentWatchlistItems = items;
+    } catch(e) { items = []; }
+  }
+  checkWatchlistAlerts(items || []);
+}
+
+
+function setPortfolioLoadProgress(kind, pct, message, visible = true) {
+  const wrap = document.getElementById(`${kind}-load-progress`);
+  const bar = document.getElementById(`${kind}-load-progress-bar`);
+  const text = document.getElementById(`${kind}-load-progress-text`);
+  if (!wrap) return;
+  wrap.classList.toggle('show', !!visible);
+  if (bar) bar.style.width = `${Math.max(0, Math.min(100, pct || 0))}%`;
+  if (text && message) text.textContent = message;
+}
+function hidePortfolioLoadProgress(kind, delay = 250) {
+  const wrap = document.getElementById(`${kind}-load-progress`);
+  if (!wrap) return;
+  setTimeout(() => wrap.classList.remove('show'), delay);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// SETTINGS
+// ──────────────────────────────────────────────────────────────────────────────
+function formatDateTimeDisplay(value) {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return String(value);
+  return d.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+}
+async function loadSettings() {
+  if (!USER) return;
+  const msg = document.getElementById('settings-password-msg');
+  if (msg) { msg.textContent = ''; msg.className = 'settings-msg'; }
+  document.getElementById('settings-username').textContent = USER.email || '—';
+  document.getElementById('settings-password').textContent = '••••••••';
+  document.getElementById('settings-last-login').textContent = 'Loading…';
+  try {
+    const p = await fetchJsonSafe(`${API}/profile/${USER.user_id}`, {cache:'no-store'});
+    document.getElementById('settings-username').textContent = p.email || USER.email || '—';
+    document.getElementById('settings-password').textContent = p.password || '••••••••';
+    document.getElementById('settings-last-login').textContent = formatDateTimeDisplay(p.last_login);
+    setLastUpdated('Settings');
+  } catch(err) {
+    document.getElementById('settings-last-login').textContent = '—';
+    if (msg) { msg.textContent = err.message || 'Unable to load profile'; msg.className = 'settings-msg err'; }
+  }
+}
+async function updateSettingsPassword() {
+  const msg = document.getElementById('settings-password-msg');
+  const newPwd = document.getElementById('settings-new-password').value;
+  const confirm = document.getElementById('settings-confirm-password').value;
+  if (msg) { msg.textContent = ''; msg.className = 'settings-msg'; }
+  if (!newPwd || newPwd.length < 4) { if (msg) { msg.textContent = 'Enter a password with at least 4 characters.'; msg.className = 'settings-msg err'; } return; }
+  if (newPwd !== confirm) { if (msg) { msg.textContent = 'Passwords do not match.'; msg.className = 'settings-msg err'; } return; }
+  try {
+    await fetchJsonSafe(`${API}/profile/${USER.user_id}/password`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({password:newPwd})});
+    document.getElementById('settings-new-password').value = '';
+    document.getElementById('settings-confirm-password').value = '';
+    if (msg) { msg.textContent = 'Password updated successfully.'; msg.className = 'settings-msg ok'; }
+    setLastUpdated('Password updated');
+  } catch(err) {
+    if (msg) { msg.textContent = err.message || 'Password update failed'; msg.className = 'settings-msg err'; }
+  }
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // PORTFOLIO
 // ──────────────────────────────────────────────────────────────────────────────
 async function loadPortfolio() {
   const uid = USER?.user_id;
   if (!uid) return;
-  const holdings = await fetchJsonSafe(`${API}/holdings/${uid}`, {cache:'no-store'});
-  if (!USER || USER.user_id !== uid) return;
-  holdingsData = holdings;
-  renderHoldingsTable(holdings);
-  renderPortfolioCards(holdings);
-  await loadPortfolioAlerts();
-  checkPortfolioAlerts(holdings);
-  await loadTrades();
-  setLastUpdated('Portfolio');
+  setPortfolioLoadProgress('holdings', 12, 'Fetching holdings…', true);
+  try {
+    const holdings = await fetchJsonSafe(`${API}/holdings/${uid}`, {cache:'no-store'});
+    setPortfolioLoadProgress('holdings', 60, 'Rendering holdings…', true);
+    if (!USER || USER.user_id !== uid) return;
+    holdingsData = holdings;
+    renderHoldingsTable(holdings);
+    renderPortfolioCards(holdings);
+    setPortfolioLoadProgress('holdings', 78, 'Checking alerts…', true);
+    await loadPortfolioAlerts();
+    checkPortfolioAlerts(holdings);
+    await runWatchlistAlertChecksForPortfolioRefresh();
+    if (document.getElementById('tab-performance')?.classList.contains('active')) await loadTrades();
+    setPortfolioLoadProgress('holdings', 100, 'Holdings loaded', true);
+    setLastUpdated('Portfolio');
+  } catch(err) {
+    const tbody = document.getElementById('holdings-tbody');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state"><i class="fa fa-triangle-exclamation"></i><p>${escapeHtml(err.message || 'Failed to load holdings')}</p></div></td></tr>`;
+  } finally {
+    hidePortfolioLoadProgress('holdings');
+  }
 }
 
 function renderPortfolioCards(holdings) {
@@ -475,13 +620,15 @@ function renderHoldingsTable(holdings) {
     tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state"><i class="fa fa-briefcase"></i><p>No holdings yet. Add your first position above.</p></div></td></tr>`;
     return;
   }
-  tbody.innerHTML = holdings.map(h => `
+  const rows = getSortedRows('holdings', holdings);
+  updateSortHeaderClasses('holdings');
+  tbody.innerHTML = rows.map(h => `
     <tr>
       <td class="td-mono">${h.date}</td>
       <td class="td-symbol">${h.symbol}</td>
       <td class="td-mono">₹${h.buy_price}</td>
       <td class="td-mono">${h.qty}</td>
-      <td class="td-mono">${h.ltp == null || h.ltp === '' || Number.isNaN(Number(h.ltp)) ? '—' : '₹' + h.ltp}</td>
+      <td class="td-mono">${moneyOrDash(h.ltp)}</td>
       <td class="td-mono">₹${fmtNum(h.invested)}</td>
       <td class="td-mono">₹${fmtNum(h.curr_value)}</td>
       <td class="td-mono ${h.pnl >= 0 ? 'td-green' : 'td-red'}">${h.pnl >= 0 ? '+' : ''}₹${fmtNum(h.pnl)}</td>
@@ -491,7 +638,7 @@ function renderHoldingsTable(holdings) {
         <div class="action-icons">
           <button class="action-btn edit" title="Set Alert" onclick="openAlertModal('${h.id}','${h.symbol}')"><i class="fa fa-bell"></i></button>
           <button class="action-btn edit" title="Edit" onclick="openEditModal('${h.id}','${h.symbol}','${h.buy_price}','${h.qty}','${h.date}')"><i class="fa fa-pen"></i></button>
-          <button class="action-btn sell" title="Sell" onclick="openSellModal('${h.id}','${h.symbol}','${h.ltp}','${h.qty}')"><i class="fa fa-dollar-sign"></i></button>
+          <button class="action-btn sell" title="Sell" onclick="openSellModal('${h.id}','${h.symbol}','${h.ltp ?? h.buy_price}','${h.qty}')"><i class="fa fa-dollar-sign"></i></button>
           <button class="action-btn del" title="Remove" onclick="deleteHolding('${encodeURIComponent(h.id)}', event)"><i class="fa fa-trash"></i></button>
         </div>
       </td>
@@ -499,50 +646,6 @@ function renderHoldingsTable(holdings) {
   `).join('');
 }
 
-
-
-function localEnrichHolding(h) {
-  const buy = Number(h.buy_price || 0);
-  const qty = Number(h.qty || 0);
-  const invested = buy * qty;
-  const ltpNum = Number(h.ltp);
-  const quoteOk = Number.isFinite(ltpNum) && ltpNum > 0 && h.quote_ok !== false;
-  const currValue = quoteOk ? ltpNum * qty : invested;
-  const pnl = currValue - invested;
-  const pnlPct = invested ? (pnl / invested) * 100 : 0;
-  return {
-    ...h,
-    buy_price: Number.isFinite(buy) ? buy : 0,
-    qty: Number.isFinite(qty) ? qty : 0,
-    ltp: quoteOk ? Number(ltpNum.toFixed ? ltpNum.toFixed(2) : ltpNum) : null,
-    quote_ok: quoteOk,
-    day_chg_pct: Number(h.day_chg_pct || 0),
-    invested: Number(invested.toFixed(2)),
-    curr_value: Number(currValue.toFixed(2)),
-    pnl: Number(pnl.toFixed(2)),
-    pnl_pct: Number(pnlPct.toFixed(2))
-  };
-}
-
-function fastRenderPortfolio(reason) {
-  holdingsData = (holdingsData || []).map(localEnrichHolding);
-  renderHoldingsTable(holdingsData);
-  renderPortfolioCards(holdingsData);
-  if (reason) setLastUpdated(reason);
-}
-
-function refreshPortfolioInBackground(reason) {
-  // Do not block Add/Edit/Sell modals on slow quote refreshes. The UI updates
-  // immediately using local data, then Yahoo/Neon refresh runs quietly.
-  setTimeout(() => {
-    loadPortfolio().then(() => {
-      if (reason) setLastUpdated(reason);
-    }).catch(err => console.warn('Background portfolio refresh failed', err));
-  }, 50);
-  setTimeout(() => {
-    if (typeof loadDashboard === 'function') loadDashboard().catch(() => {});
-  }, 150);
-}
 
 function compareAlertValue(actual, op, threshold) {
   const a = Number(actual), t = Number(threshold);
@@ -560,7 +663,7 @@ function alertColumnLabel(col) {
 }
 
 async function loadPortfolioAlerts() {
-  if (!USER) { portfolioAlerts = []; return; }
+  if (!USER) { portfolioAlerts = []; renderPortfolioAlertsTable(); return; }
   try {
     const data = await fetchJsonSafe(`${API}/portfolio-alerts/${encodeURIComponent(USER.user_id)}`, {cache:'no-store'});
     portfolioAlerts = Array.isArray(data) ? data : [];
@@ -570,38 +673,42 @@ async function loadPortfolioAlerts() {
   renderPortfolioAlertsTable();
 }
 
-function fmtDateTime(v) {
-  if (!v) return '—';
-  try {
-    const d = new Date(v);
-    if (Number.isNaN(d.getTime())) return escapeHtml(v);
-    return new Intl.DateTimeFormat('en-IN', {timeZone:'Asia/Kolkata', day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit'}).format(d);
-  } catch(e) { return escapeHtml(v); }
+function formatAlertDate(value) {
+  if (!value) return '-';
+  try { return new Date(value).toLocaleString('en-IN'); } catch(e) { return String(value); }
 }
 
-function alertConditionText(alert) {
-  return `${alert.symbol || ''} — ${alertColumnLabel(alert.column_name || alert.column)} ${alert.condition_op || alert.condition || '>'} ${alert.threshold}`;
+function alertStatus(alert) {
+  return alert.triggered_at ? 'Triggered' : (alert.active === false ? 'Inactive' : 'Active');
 }
 
 function renderPortfolioAlertsTable() {
   const tbody = document.getElementById('portfolio-alerts-tbody');
   if (!tbody) return;
-  if (!portfolioAlerts.length) {
+  const alerts = portfolioAlerts || [];
+  if (!alerts.length) {
     tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><i class="fa fa-bell"></i><p>No alerts created yet</p></div></td></tr>`;
     return;
   }
-  tbody.innerHTML = portfolioAlerts.map(a => {
-    const triggered = !!a.triggered_at;
-    return `<tr>
-      <td><strong>${escapeHtml(alertConditionText(a))}</strong></td>
-      <td><span class="alert-status ${triggered ? 'triggered' : 'active'}">${triggered ? 'Triggered' : 'Active'}</span></td>
-      <td>${fmtDateTime(a.triggered_at)}</td>
-      <td>${fmtDateTime(a.created_at)}</td>
-      <td><div class="action-icons">
-        <button class="action-btn edit" title="Edit Alert" onclick="editPortfolioAlert('${encodeURIComponent(a.id)}')"><i class="fa fa-pen"></i></button>
-        <button class="action-btn del" title="Delete Alert" onclick="deletePortfolioAlert('${encodeURIComponent(a.id)}')"><i class="fa fa-trash"></i></button>
-      </div></td>
-    </tr>`;
+  tbody.innerHTML = alerts.map(a => {
+    const col = a.column_name || a.column || 'ltp';
+    const op = a.condition_op || a.condition || '>';
+    const status = alertStatus(a);
+    const src = (a.source || (a.holding_id ? 'portfolio' : 'watchlist')) === 'watchlist' ? 'Watchlist' : 'Portfolio';
+    const name = `${a.symbol || ''} — ${alertColumnLabel(col)} ${op} ${a.threshold} (${src})`;
+    return `
+      <tr>
+        <td><div class="td-symbol">${escapeHtml(name)}</div></td>
+        <td><span class="alert-status ${status.toLowerCase()}">${status}</span></td>
+        <td class="td-mono">${formatAlertDate(a.triggered_at)}</td>
+        <td class="td-mono">${formatAlertDate(a.created_at)}</td>
+        <td>
+          <div class="action-icons">
+            <button class="action-btn edit" title="Edit Alert" onclick="editPortfolioAlert('${escapeHtml(String(a.id))}')"><i class="fa fa-pen"></i></button>
+            <button class="action-btn del" title="Delete Alert" onclick="deletePortfolioAlert('${escapeHtml(String(a.id))}')"><i class="fa fa-trash"></i></button>
+          </div>
+        </td>
+      </tr>`;
   }).join('');
 }
 
@@ -613,18 +720,7 @@ async function markPortfolioAlertTriggered(alert) {
   try {
     const res = await fetchJsonSafe(`${API}/portfolio-alerts/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(alert.id)}/triggered`, {method:'POST', cache:'no-store'});
     alert.triggered_at = res.triggered_at || alert.triggered_at;
-    renderPortfolioAlertsTable();
-  } catch(e) { renderPortfolioAlertsTable(); }
-}
-
-function dismissTriggeredAlert(id) {
-  portfolioAlertDismissedIds.add(String(id));
-  checkPortfolioAlerts(holdingsData || []);
-}
-function clearTriggeredAlertNotifications() {
-  (portfolioAlerts || []).forEach(a => portfolioAlertDismissedIds.add(String(a.id)));
-  const panel = document.getElementById('portfolio-alert-hit-panel');
-  if (panel) { panel.classList.remove('show'); panel.innerHTML = ''; }
+  } catch(e) { /* non-blocking */ }
 }
 
 function checkPortfolioAlerts(holdings) {
@@ -632,66 +728,131 @@ function checkPortfolioAlerts(holdings) {
   if (!panel) return;
   const hits = [];
   for (const alert of portfolioAlerts || []) {
-    // Only Active alerts are allowed to notify. Once an alert has triggered_at,
-    // keep it visible in the Alerts tab as Triggered but do not show notifications again.
+    // Only Active alerts are notified. Triggered alerts remain visible in
+    // Portfolio → Alerts but do not generate repeat notifications.
     if (alert.triggered_at) continue;
     if (alert.active === false) continue;
+    if ((alert.source || (alert.holding_id ? 'portfolio' : 'watchlist')) === 'watchlist') continue;
     const h = (holdings || []).find(x => String(x.id) === String(alert.holding_id) || String(x.symbol).toUpperCase() === String(alert.symbol).toUpperCase());
     if (!h) continue;
     const col = alert.column_name || alert.column || 'ltp';
     const actual = h[col];
     if (compareAlertValue(actual, alert.condition_op || alert.condition || '>', alert.threshold)) {
       markPortfolioAlertTriggered(alert);
-      if (!portfolioAlertDismissedIds.has(String(alert.id))) {
-        hits.push({id: alert.id, text: `${h.symbol}: ${alertColumnLabel(col)} ${alert.condition_op || alert.condition || '>'} ${alert.threshold} — current ${actual}`});
-      }
+      hits.push({id: alert.id, text: `${h.symbol}: ${alertColumnLabel(col)} ${alert.condition_op || alert.condition || '>'} ${alert.threshold} — current ${actual}`});
     }
   }
+  renderPortfolioAlertsTable();
   if (!hits.length) {
     panel.classList.remove('show');
     panel.innerHTML = '';
     return;
   }
   panel.classList.add('show');
-  panel.innerHTML = `<div class="alert-hit-head"><strong><i class="fa fa-bell"></i> Portfolio alerts triggered</strong><button class="alert-hit-close" title="Clear notifications" onclick="clearTriggeredAlertNotifications()"><i class="fa fa-times"></i></button></div><ul>${hits.map(h => `<li><div class="alert-hit-row"><span>${escapeHtml(h.text)}</span><button class="alert-dismiss-btn" onclick="dismissTriggeredAlert('${escapeHtml(h.id)}')">Delete notification</button></div></li>`).join('')}</ul>`;
+  panel.innerHTML = `
+    <div class="alert-hit-head">
+      <strong><i class="fa fa-bell"></i> Portfolio alerts triggered</strong>
+      <button class="alert-hit-close" onclick="clearTriggeredAlertNotifications()"><i class="fa fa-times"></i> Clear</button>
+    </div>
+    <ul>${hits.map(h => `<li class="alert-hit-row"><span>${escapeHtml(h.text)}</span><button class="alert-dismiss-btn" onclick="deletePortfolioAlert('${escapeHtml(String(h.id))}')"><i class="fa fa-trash"></i> Delete</button></li>`).join('')}</ul>`;
 }
 
-function openAlertModal(holdingId, symbol) {
+function checkWatchlistAlerts(items) {
+  const hits = [];
+  for (const alert of portfolioAlerts || []) {
+    if (alert.triggered_at) continue;
+    if (alert.active === false) continue;
+    if ((alert.source || (alert.holding_id ? 'portfolio' : 'watchlist')) !== 'watchlist') continue;
+    const target = compactWatchlistSymbol(alert.symbol);
+    const item = (items || []).find(x => compactWatchlistSymbol(x.symbol) === target);
+    if (!item) continue;
+    const col = alert.column_name || alert.column || 'ltp';
+    const actual = col === 'day_chg_pct' ? item.day_chg_pct : item.ltp;
+    if (compareAlertValue(actual, alert.condition_op || alert.condition || '>', alert.threshold)) {
+      markPortfolioAlertTriggered(alert);
+      hits.push({id: alert.id, text: `${item.symbol}: ${alertColumnLabel(col)} ${alert.condition_op || alert.condition || '>'} ${alert.threshold} — current ${actual}`});
+    }
+  }
+  renderPortfolioAlertsTable();
+  const panel = document.getElementById('portfolio-alert-hit-panel');
+  if (!hits.length || !panel || activePage !== 'portfolio') return;
+  panel.classList.add('show');
+  panel.innerHTML = `
+    <div class="alert-hit-head">
+      <strong><i class="fa fa-bell"></i> Watchlist alerts triggered</strong>
+      <button class="alert-hit-close" onclick="clearTriggeredAlertNotifications()"><i class="fa fa-times"></i> Clear</button>
+    </div>
+    <ul>${hits.map(h => `<li class="alert-hit-row"><span>${escapeHtml(h.text)}</span><button class="alert-dismiss-btn" onclick="deletePortfolioAlert('${escapeHtml(String(h.id))}')"><i class="fa fa-trash"></i> Delete</button></li>`).join('')}</ul>`;
+}
+
+function clearTriggeredAlertNotifications() {
+  const panel = document.getElementById('portfolio-alert-hit-panel');
+  if (!panel) return;
+  panel.classList.remove('show');
+  panel.innerHTML = '';
+}
+
+function configureAlertColumnOptions(source, selected='ltp') {
+  const sel = document.getElementById('alert-column');
+  if (!sel) return;
+  const opts = source === 'watchlist'
+    ? [{v:'ltp', t:'LTP'}, {v:'day_chg_pct', t:'Day Chng %'}]
+    : [{v:'ltp', t:'LTP'}, {v:'pnl_pct', t:'P&L (%)'}, {v:'day_chg_pct', t:'Day Chng %'}];
+  sel.innerHTML = opts.map(o => `<option value="${o.v}">${o.t}</option>`).join('');
+  sel.value = opts.some(o => o.v === selected) ? selected : 'ltp';
+}
+
+function openAlertModal(holdingId, symbol, source='portfolio') {
   document.getElementById('alert-id').value = '';
-  document.getElementById('alert-holding-id').value = holdingId;
+  document.getElementById('alert-holding-id').value = holdingId || '';
+  document.getElementById('alert-source').value = source || 'portfolio';
   document.getElementById('alert-symbol').value = symbol;
-  document.getElementById('alert-column').value = 'ltp';
+  configureAlertColumnOptions(source || 'portfolio', 'ltp');
   document.getElementById('alert-condition').value = '>';
   document.getElementById('alert-value').value = '';
   document.getElementById('alert-error').textContent = '';
   document.getElementById('alert-modal').classList.add('open');
 }
-function closeAlertModal() { document.getElementById('alert-modal').classList.remove('open'); }
 
-function editPortfolioAlert(encodedId) {
-  const id = decodeURIComponent(encodedId);
-  const a = (portfolioAlerts || []).find(x => String(x.id) === String(id));
+function openWatchlistAlertModal(payload) {
+  let item = {};
+  try { item = JSON.parse(decodeURIComponent(payload)); } catch(e) { item = {}; }
+  openAlertModal('', item.symbol || '', 'watchlist');
+}
+
+function editPortfolioAlert(alertId) {
+  const a = (portfolioAlerts || []).find(x => String(x.id) === String(alertId));
   if (!a) return;
   document.getElementById('alert-id').value = a.id;
   document.getElementById('alert-holding-id').value = a.holding_id || '';
+  document.getElementById('alert-source').value = a.source || (a.holding_id ? 'portfolio' : 'watchlist');
   document.getElementById('alert-symbol').value = a.symbol || '';
-  document.getElementById('alert-column').value = a.column_name || a.column || 'ltp';
+  configureAlertColumnOptions(document.getElementById('alert-source').value, a.column_name || a.column || 'ltp');
   document.getElementById('alert-condition').value = a.condition_op || a.condition || '>';
-  document.getElementById('alert-value').value = a.threshold ?? '';
+  document.getElementById('alert-value').value = a.threshold;
   document.getElementById('alert-error').textContent = '';
   document.getElementById('alert-modal').classList.add('open');
 }
 
-async function deletePortfolioAlert(encodedId) {
-  const id = decodeURIComponent(encodedId);
+function closeAlertModal() { document.getElementById('alert-modal').classList.remove('open'); }
+
+async function deletePortfolioAlert(alertId) {
+  if (!USER || !alertId) return;
   if (!confirm('Delete this alert?')) return;
+  const before = portfolioAlerts.slice();
+  portfolioAlerts = portfolioAlerts.filter(a => String(a.id) !== String(alertId));
+  renderPortfolioAlertsTable();
+  clearTriggeredAlertNotifications();
   try {
-    await fetchJsonSafe(`${API}/portfolio-alerts/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(id)}`, {method:'DELETE', cache:'no-store'});
-    portfolioAlertDismissedIds.delete(String(id));
+    await fetchJsonSafe(`${API}/portfolio-alerts/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(alertId)}`, {method:'DELETE', cache:'no-store'});
     await loadPortfolioAlerts();
     checkPortfolioAlerts(holdingsData || []);
     setLastUpdated('Portfolio alert deleted');
-  } catch(e) { alert(e.message || 'Could not delete alert.'); }
+  } catch(e) {
+    portfolioAlerts = before;
+    renderPortfolioAlertsTable();
+    alert(e.message || 'Could not delete alert.');
+  }
 }
 
 async function savePortfolioAlert() {
@@ -699,21 +860,24 @@ async function savePortfolioAlert() {
   err.textContent = '';
   const alertId = document.getElementById('alert-id').value;
   const holdingId = document.getElementById('alert-holding-id').value;
+  const source = document.getElementById('alert-source').value || (holdingId ? 'portfolio' : 'watchlist');
   const symbol = document.getElementById('alert-symbol').value;
   const column = document.getElementById('alert-column').value;
   const condition = document.getElementById('alert-condition').value;
   const value = parseFloat(document.getElementById('alert-value').value);
   if (!Number.isFinite(value)) { err.textContent = 'Enter a valid alert value.'; return; }
   try {
-    const url = alertId ? `${API}/portfolio-alerts/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(alertId)}` : `${API}/portfolio-alerts/${encodeURIComponent(USER.user_id)}`;
+    const url = alertId
+      ? `${API}/portfolio-alerts/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(alertId)}`
+      : `${API}/portfolio-alerts/${encodeURIComponent(USER.user_id)}`;
     await fetchJsonSafe(url, {
       method: alertId ? 'PUT' : 'POST', headers:{'Content-Type':'application/json'}, cache:'no-store',
-      body: JSON.stringify({holding_id: holdingId, symbol, column_name: column, condition_op: condition, threshold: value})
+      body: JSON.stringify({holding_id: holdingId, source, symbol, column_name: column, condition_op: condition, threshold: value})
     });
-    if (alertId) portfolioAlertDismissedIds.delete(String(alertId));
     closeAlertModal();
-    await loadPortfolio();
-    setLastUpdated(alertId ? 'Portfolio alert updated' : 'Portfolio alert saved');
+    await loadPortfolioAlerts();
+    if (source === 'portfolio') await loadPortfolio(); else { await loadWatchlist(false); }
+    setLastUpdated(alertId ? 'Alert updated' : 'Alert saved');
   } catch(e) {
     err.textContent = e.message || 'Could not save alert.';
   }
@@ -760,45 +924,23 @@ async function addHolding() {
   if (!price || price <= 0) { errEl.textContent = 'Enter a valid buy price'; return; }
   if (!qty || qty <= 0) { errEl.textContent = 'Enter a valid quantity'; return; }
 
-  const tempId = `tmp-${Date.now()}`;
-  const optimistic = localEnrichHolding({
-    id: tempId,
-    symbol: selectedTicker.symbol,
-    name: selectedTicker.name,
-    buy_price: price,
-    qty,
-    date,
-    industry: selectedTicker.industry || '',
-    sector: '',
-    ltp: null,
-    quote_ok: false,
-    day_chg_pct: 0
+  const r = await fetch(`${API}/holdings/${USER.user_id}`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({symbol: selectedTicker.symbol, name: selectedTicker.name,
+      buy_price: price, qty, date, industry: selectedTicker.industry})
   });
-  holdingsData = [...(holdingsData || []), optimistic];
-  fastRenderPortfolio('Adding holding...');
-
-  document.getElementById('add-ticker').value = '';
-  document.getElementById('add-price').value = '';
-  document.getElementById('add-qty').value = '';
-  document.getElementById('add-date').value = new Date().toISOString().split('T')[0];
-  const savedTicker = selectedTicker;
-  selectedTicker = null;
-
-  try {
-    const d = await fetchJsonSafe(`${API}/holdings/${encodeURIComponent(USER.user_id)}`, {
-      method: 'POST', headers: {'Content-Type':'application/json'}, cache:'no-store',
-      body: JSON.stringify({symbol: savedTicker.symbol, name: savedTicker.name,
-        buy_price: price, qty, date, industry: savedTicker.industry})
-    });
-    if (d && d.holding) {
-      holdingsData = (holdingsData || []).map(h => String(h.id) === tempId ? localEnrichHolding(d.holding) : h);
-      fastRenderPortfolio('Holding added');
-    }
-    refreshPortfolioInBackground('Holding added');
-  } catch(e) {
-    holdingsData = (holdingsData || []).filter(h => String(h.id) !== tempId);
-    fastRenderPortfolio('Add failed');
-    errEl.textContent = e.message || 'Error adding holding';
+  if (r.ok) {
+    document.getElementById('add-ticker').value = '';
+    document.getElementById('add-price').value = '';
+    document.getElementById('add-qty').value = '';
+    document.getElementById('add-date').value = new Date().toISOString().split('T')[0];
+    selectedTicker = null;
+    await loadPortfolio();
+    setLastUpdated('Holding added');
+    loadDashboard();
+  } else {
+    const d = await r.json();
+    errEl.textContent = d.error || 'Error adding holding';
   }
 }
 
@@ -807,15 +949,83 @@ async function deleteHolding(id, ev) {
   const holdingId = decodeURIComponent(id || '');
   if (!USER || !holdingId) return;
   if (!confirm('Remove this holding?')) return;
+  const before = holdingsData.slice();
+  holdingsData = holdingsData.filter(h => String(h.id) !== String(holdingId));
+  renderHoldingsTable(holdingsData);
+  renderPortfolioCards(holdingsData);
   try {
-    await fetchJsonSafe(`${API}/holdings/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(holdingId)}`, {method:'DELETE', cache:'no-store'});
-  } catch(err) {
-    // Some serverless/proxy setups are stricter with DELETE. Use POST fallback.
-    await fetchJsonSafe(`${API}/holdings/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(holdingId)}/delete`, {method:'POST', cache:'no-store'});
+    try {
+      await fetchJsonSafe(`${API}/holdings/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(holdingId)}`, {method:'DELETE', cache:'no-store'});
+    } catch(err) {
+      // Some serverless/proxy setups are stricter with DELETE. Use POST fallback.
+      await fetchJsonSafe(`${API}/holdings/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(holdingId)}/delete`, {method:'POST', cache:'no-store'});
+    }
+    setLastUpdated('Holding removed');
+    loadPortfolio();
+    loadDashboard();
+  } catch(e) {
+    holdingsData = before;
+    renderHoldingsTable(holdingsData);
+    renderPortfolioCards(holdingsData);
+    alert(e.message || 'Could not remove holding.');
   }
-  await loadPortfolio();
-  await loadDashboard();
-  setLastUpdated('Holding removed');
+}
+
+
+// IMPORT BROKER TRADES MODAL
+function openImportTradesModal() {
+  const err = document.getElementById('import-trades-error');
+  const summary = document.getElementById('import-trades-summary');
+  if (err) err.textContent = '';
+  if (summary) { summary.style.display = 'none'; summary.innerHTML = ''; }
+  const file = document.getElementById('import-trades-file');
+  if (file) file.value = '';
+  document.getElementById('import-trades-modal').classList.add('open');
+}
+function closeImportTradesModal() { document.getElementById('import-trades-modal').classList.remove('open'); }
+
+async function importBrokerTrades() {
+  const err = document.getElementById('import-trades-error');
+  const summary = document.getElementById('import-trades-summary');
+  const btn = document.querySelector('#import-trades-modal .btn-primary');
+  err.textContent = '';
+  summary.style.display = 'none';
+  summary.innerHTML = '';
+  if (!USER) { err.textContent = 'Login required'; return; }
+  const fileInput = document.getElementById('import-trades-file');
+  if (!fileInput.files || !fileInput.files[0]) { err.textContent = 'Select a broker CSV file'; return; }
+  const fd = new FormData();
+  fd.append('file', fileInput.files[0]);
+  fd.append('broker', document.getElementById('import-broker').value || 'auto');
+  const old = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Importing…';
+  try {
+    const data = await fetchJsonSafe(`${API}/import-trades/${encodeURIComponent(USER.user_id)}`, {
+      method: 'POST',
+      body: fd,
+      cache: 'no-store'
+    });
+    const warnings = Array.isArray(data.warnings) && data.warnings.length
+      ? `<div style="margin-top:8px"><strong>Warnings:</strong><ul style="margin:6px 0 0 18px">${data.warnings.map(w => `<li>${escapeHtml(String(w))}</li>`).join('')}</ul></div>`
+      : '';
+    summary.innerHTML = `
+      <strong>Imported ${Number(data.holdings_added || 0)} holdings and ${Number(data.trades_added || 0)} closed trades</strong><br>
+      Detected broker: <strong>${escapeHtml(data.detected_broker || 'generic')}</strong><br>
+      Source format: ${escapeHtml(data.source_format || 'tradebook')} · Rows parsed: ${Number(data.normalized_rows || 0)}<br>
+      Duplicate skipped: ${Number(data.holdings_skipped || 0)} holdings, ${Number(data.trades_skipped || 0)} closed trades
+      ${warnings}`;
+    summary.style.display = 'block';
+    await loadPortfolio();
+    await loadTrades();
+    await loadDashboard();
+    setLastUpdated('Broker trades imported');
+  } catch(e) {
+    err.textContent = e.message || 'Import failed';
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = old;
+  }
 }
 
 // SELL MODAL
@@ -839,43 +1049,24 @@ async function confirmSell() {
   if (!sell_price || sell_price <= 0) { document.getElementById('sell-error').textContent = 'Enter a valid sell price'; return; }
   if (!sell_qty || sell_qty <= 0) { document.getElementById('sell-error').textContent = 'Enter a valid sell quantity'; return; }
   if (sellMaxQty && sell_qty > sellMaxQty) { document.getElementById('sell-error').textContent = `Sell quantity cannot exceed available quantity (${sellMaxQty})`; return; }
-
-  const prevHoldings = [...(holdingsData || [])];
-  const target = (holdingsData || []).find(h => String(h.id) === String(sellHoldingId));
-  if (target) {
-    const remaining = Math.max(0, Number(target.qty || 0) - sell_qty);
-    holdingsData = remaining <= 0
-      ? (holdingsData || []).filter(h => String(h.id) !== String(sellHoldingId))
-      : (holdingsData || []).map(h => String(h.id) === String(sellHoldingId) ? localEnrichHolding({...h, qty: remaining}) : h);
-    fastRenderPortfolio('Selling holding...');
-  }
-
   const btn = document.querySelector('#sell-modal .btn-primary');
   const origText = btn.textContent;
   btn.innerHTML = '<div class="spinner" style="margin:0;border-top-color:#000"></div>';
   btn.disabled = true;
   document.getElementById('sell-error').textContent = '';
-  closeSellModal();
-
   try {
-    const d = await fetchJsonSafe(`${API}/sell/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(sellHoldingId)}`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'}, cache:'no-store',
+    const r = await fetch(`${API}/sell/${USER.user_id}/${sellHoldingId}`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({sell_price, qty: sell_qty})
     });
-    if (d && typeof d.remaining_qty !== 'undefined') {
-      const remaining = Number(d.remaining_qty || 0);
-      holdingsData = remaining <= 0
-        ? (holdingsData || []).filter(h => String(h.id) !== String(sellHoldingId))
-        : (holdingsData || []).map(h => String(h.id) === String(sellHoldingId) ? localEnrichHolding({...h, qty: remaining}) : h);
-      fastRenderPortfolio('Holding sold');
-    }
-    loadTrades().catch(() => {});
-    refreshPortfolioInBackground('Holding sold');
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Sell failed');
+    closeSellModal();
+    await loadPortfolio();
+    loadDashboard();
+    setLastUpdated('Holding sold');
   } catch(err) {
-    holdingsData = prevHoldings;
-    fastRenderPortfolio('Sell failed');
     document.getElementById('sell-error').textContent = err.message || 'Network error — try again';
-    document.getElementById('sell-modal').classList.add('open');
   } finally {
     btn.innerHTML = origText;
     btn.disabled = false;
@@ -899,40 +1090,30 @@ async function confirmEdit() {
   const price = parseFloat(document.getElementById('edit-price').value);
   const qty = parseFloat(document.getElementById('edit-qty').value);
   const date = document.getElementById('edit-date').value;
-  const errEl = document.getElementById('edit-error');
-  errEl.textContent = '';
-  if (!price || !qty) { errEl.textContent = 'Fill all fields'; return; }
-
-  const prevHoldings = [...(holdingsData || [])];
-  holdingsData = (holdingsData || []).map(h => String(h.id) === String(editHoldingId) ? localEnrichHolding({...h, buy_price: price, qty, date}) : h);
-  closeEditModal();
-  fastRenderPortfolio('Holding updated');
-
-  try {
-    await fetchJsonSafe(`${API}/holdings/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(editHoldingId)}`, {
-      method:'PUT', headers:{'Content-Type':'application/json'}, cache:'no-store',
-      body: JSON.stringify({buy_price: price, qty, date})
-    });
-    refreshPortfolioInBackground('Holding updated');
-  } catch(e) {
-    holdingsData = prevHoldings;
-    fastRenderPortfolio('Edit failed');
-    errEl.textContent = e.message || 'Update failed';
-    document.getElementById('edit-modal').classList.add('open');
+  if (!price || !qty) { document.getElementById('edit-error').textContent = 'Fill all fields'; return; }
+  const r = await fetch(`${API}/holdings/${USER.user_id}/${editHoldingId}`, {
+    method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({buy_price: price, qty, date})
+  });
+  if (r.ok) {
+    closeEditModal();
+    await loadPortfolio();
+    loadDashboard();
+    setLastUpdated('Holding updated');
   }
 }
 
 // PORTFOLIO TABS
 function switchPortTab(tab) {
-  const order = ['holdings','alerts','performance'];
+  const tabs = ['holdings','alerts','performance'];
   document.querySelectorAll('#page-portfolio .tabs-bar .tab-btn').forEach((b,i) => {
-    b.classList.remove('active');
-    if (order[i] === tab) b.classList.add('active');
+    b.classList.toggle('active', tabs[i] === tab);
   });
   document.querySelectorAll('#page-portfolio .tab-content').forEach(t => t.classList.remove('active'));
-  document.getElementById(`tab-${tab}`).classList.add('active');
+  const target = document.getElementById(`tab-${tab}`);
+  if (target) target.classList.add('active');
   if (tab === 'performance') loadTrades();
-  if (tab === 'alerts') { loadPortfolioAlerts(); }
+  if (tab === 'alerts') loadPortfolioAlerts();
 }
 
 function renderAllocationCharts() {
@@ -972,47 +1153,42 @@ function renderAllocationCharts() {
   }]},options:chartOpts('₹')}); }
 }
 
-async function loadTrades() {
-  const r = await fetch(`${API}/trades/${USER.user_id}`);
-  const trades = await r.json();
-  const tbody = document.getElementById('trades-tbody');
+function resetPerformanceSummary() {
+  document.getElementById('perf-total-trades').textContent = 0;
+  document.getElementById('perf-realised').textContent = '₹0';
+  document.getElementById('perf-realised').className = 'card-value td-mono';
+  document.getElementById('perf-win-rate').textContent = '0%';
+  document.getElementById('perf-best').textContent = '₹0';
+}
 
-  if (!trades.length) {
-    tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><i class="fa fa-history"></i><p>No completed trades yet. Sell a holding to record a trade.</p></div></td></tr>`;
-    document.getElementById('perf-total-trades').textContent = 0;
-    document.getElementById('perf-realised').textContent = '₹0';
-    document.getElementById('perf-win-rate').textContent = '0%';
-    document.getElementById('perf-best').textContent = '₹0';
+function renderTradesTable(trades) {
+  const tbody = document.getElementById('trades-tbody');
+  if (!tbody) return;
+  const rows = getSortedRows('trades', trades || []);
+  updateSortHeaderClasses('trades');
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state"><i class="fa fa-history"></i><p>No completed trades yet. Sell a holding to record a trade.</p></div></td></tr>`;
     return;
   }
-
-  const totalPnl = trades.reduce((s,t) => s+t.pnl, 0);
-  const wins = trades.filter(t => t.pnl > 0).length;
-  const best = Math.max(...trades.map(t => t.pnl));
-
-  document.getElementById('perf-total-trades').textContent = trades.length;
-  document.getElementById('perf-realised').textContent = `${totalPnl >= 0 ? '+' : ''}₹${fmtNum(totalPnl)}`;
-  document.getElementById('perf-realised').className = `card-value td-mono ${totalPnl >= 0 ? 'green' : 'red'}`;
-  document.getElementById('perf-win-rate').textContent = `${((wins/trades.length)*100).toFixed(0)}%`;
-  document.getElementById('perf-best').textContent = `₹${fmtNum(best)}`;
-
-  tbody.innerHTML = trades.map(t => `
+  tbody.innerHTML = rows.map(t => `
     <tr>
-      <td class="td-symbol">${t.symbol}</td>
+      <td class="td-symbol">${escapeHtml(t.symbol)}</td>
       <td class="td-mono">${t.qty}</td>
       <td class="td-mono">₹${t.buy_price}</td>
       <td class="td-mono">₹${t.sell_price}</td>
-      <td class="td-mono">${t.buy_date}</td>
-      <td class="td-mono">${t.sell_date}</td>
-      <td class="td-mono ${t.pnl >= 0 ? 'td-green' : 'td-red'}">${t.pnl >= 0 ? '+' : ''}₹${fmtNum(t.pnl)}</td>
-      <td><span class="badge ${t.pnl_pct >= 0 ? 'badge-green' : 'badge-red'}">${t.pnl_pct >= 0 ? '▲' : '▼'} ${Math.abs(t.pnl_pct)}%</span></td>
+      <td class="td-mono">${escapeHtml(t.buy_date || '')}</td>
+      <td class="td-mono">${escapeHtml(t.sell_date || '')}</td>
+      <td class="td-mono ${Number(t.pnl || 0) >= 0 ? 'td-green' : 'td-red'}">${Number(t.pnl || 0) >= 0 ? '+' : ''}₹${fmtNum(Number(t.pnl || 0))}</td>
+      <td><span class="badge ${Number(t.pnl_pct || 0) >= 0 ? 'badge-green' : 'badge-red'}">${Number(t.pnl_pct || 0) >= 0 ? '▲' : '▼'} ${Math.abs(Number(t.pnl_pct || 0))}%</span></td>
+      <td><div class="action-icons"><button class="action-btn del" title="Delete trade" onclick="deleteTrade('${encodeURIComponent(t.id)}', event)"><i class="fa fa-trash"></i></button></div></td>
     </tr>
   `).join('');
+}
 
-  // Cumulative P&L chart
+function renderPerformanceChart(trades) {
   try {
     let cum = 0;
-    const cumData = trades.map(t => { cum += Number(t.pnl || 0); return cum; });
+    const cumData = (trades || []).map(t => { cum += Number(t.pnl || 0); return cum; });
     const canvas = document.getElementById('perf-cumulative-chart');
     const ctx = canvas ? canvas.getContext('2d') : null;
     if (ctx) {
@@ -1020,16 +1196,78 @@ async function loadTrades() {
       perfCumulativeChart = new Chart(ctx, {
         type: 'line',
         data: {
-          labels: trades.map(t => t.sell_date),
+          labels: (trades || []).map(t => t.sell_date),
           datasets: [{label:'Cumulative P&L (₹)',data:cumData,borderColor:'#00c896',backgroundColor:'rgba(0,200,150,0.08)',fill:true,tension:.4,pointRadius:4,pointBackgroundColor:'#00c896'}]
         },
         options: chartOpts('₹')
       });
     }
   } catch(chartErr) { console.warn('Performance chart render failed', chartErr); }
-  setPortfolioLoadProgress('trades', 100, 'Performance report loaded', true);
-  hidePortfolioLoadProgress('trades');
 }
+
+async function loadTrades() {
+  const tbody = document.getElementById('trades-tbody');
+  setPortfolioLoadProgress('trades', 15, 'Fetching performance report…', true);
+  try {
+    const trades = await fetchJsonSafe(`${API}/trades/${USER.user_id}`, {cache:'no-store'});
+    tradesData = Array.isArray(trades) ? trades : [];
+    setPortfolioLoadProgress('trades', 65, 'Rendering performance report…', true);
+
+    if (!tradesData.length) {
+      resetPerformanceSummary();
+      renderTradesTable([]);
+      renderPerformanceChart([]);
+      setPortfolioLoadProgress('trades', 100, 'Performance report loaded', true);
+      hidePortfolioLoadProgress('trades');
+      return;
+    }
+
+    const totalPnl = tradesData.reduce((s,t) => s + Number(t.pnl || 0), 0);
+    const wins = tradesData.filter(t => Number(t.pnl || 0) > 0).length;
+    const best = Math.max(...tradesData.map(t => Number(t.pnl || 0)));
+
+    document.getElementById('perf-total-trades').textContent = tradesData.length;
+    document.getElementById('perf-realised').textContent = `${totalPnl >= 0 ? '+' : ''}₹${fmtNum(totalPnl)}`;
+    document.getElementById('perf-realised').className = `card-value td-mono ${totalPnl >= 0 ? 'green' : 'red'}`;
+    document.getElementById('perf-win-rate').textContent = `${((wins/tradesData.length)*100).toFixed(0)}%`;
+    document.getElementById('perf-best').textContent = `₹${fmtNum(best)}`;
+
+    renderTradesTable(tradesData);
+    renderPerformanceChart(tradesData);
+    setPortfolioLoadProgress('trades', 100, 'Performance report loaded', true);
+    hidePortfolioLoadProgress('trades');
+  } catch(err) {
+    if (tbody) tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state"><i class="fa fa-triangle-exclamation"></i><p>${escapeHtml(err.message || 'Failed to load performance report')}</p></div></td></tr>`;
+    hidePortfolioLoadProgress('trades');
+  }
+}
+
+async function deleteTrade(encodedId, ev) {
+  if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+  const tradeId = decodeURIComponent(encodedId || '');
+  if (!USER || !tradeId) return;
+  if (!confirm('Delete this performance report row?')) return;
+  const previous = [...(tradesData || [])];
+  tradesData = (tradesData || []).filter(t => String(t.id) !== String(tradeId));
+  renderTradesTable(tradesData);
+  renderPerformanceChart(tradesData);
+  try {
+    await fetchJsonSafe(`${API}/trades/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(tradeId)}`, {method:'DELETE', cache:'no-store'});
+  } catch(err) {
+    try {
+      await fetchJsonSafe(`${API}/trades/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(tradeId)}/delete`, {method:'POST', cache:'no-store'});
+    } catch(e) {
+      tradesData = previous;
+      renderTradesTable(tradesData);
+      renderPerformanceChart(tradesData);
+      alert(e.message || err.message || 'Could not delete trade.');
+      return;
+    }
+  }
+  await loadTrades();
+  setLastUpdated('Trade deleted');
+}
+
 
 // ──────────────────────────────────────────────────────────────────────────────
 // WATCHLIST
@@ -1306,6 +1544,8 @@ async function loadWatchlist(refreshGroups = true) {
     setWatchlistLoadingProgress(78, 'Rendering watchlist table and heat map…', true);
     currentWatchlistItems = Array.isArray(items) ? items : [];
     renderWatchlistItems(currentWatchlistItems);
+    await loadPortfolioAlerts();
+    checkWatchlistAlerts(currentWatchlistItems);
     setWatchlistLoadingProgress(100, 'Watchlist loaded.', true);
     setTimeout(() => setWatchlistLoadingProgress(0, '', false), 450);
     setLastUpdated(`Watchlist · ${group}`);
@@ -1324,7 +1564,9 @@ function renderWatchlistItems(items) {
     renderWatchlistHeatmap([]);
     return;
   }
-  tbody.innerHTML = items.map(item => `
+  const rows = getSortedRows('watchlist', items);
+  updateSortHeaderClasses('watchlist');
+  tbody.innerHTML = rows.map(item => `
     <tr data-watch-symbol="${escapeHtml(item.symbol)}">
       <td class="td-symbol"><a href="${tradingViewUrl(item.symbol)}" target="_blank" rel="noopener noreferrer" title="Open in TradingView">${escapeHtml(item.symbol)}</a></td>
       <td>${escapeHtml(item.name || '—')}</td>
@@ -1335,6 +1577,7 @@ function renderWatchlistItems(items) {
       <td><span class="badge ${(item.day_chg_pct||0) >= 0 ? 'badge-green' : 'badge-red'}">${(item.day_chg_pct||0) >= 0 ? '+' : ''}${item.day_chg_pct || 0}%</span></td>
       <td>
         <div class="action-icons">
+          <button class="action-btn edit" title="Set Alert" onclick="openWatchlistAlertModal('${encodeURIComponent(JSON.stringify({symbol:item.symbol, name:item.name || item.symbol, ltp:item.ltp || '', day_chg_pct:item.day_chg_pct || 0}))}')"><i class="fa fa-bell"></i></button>
           <button class="action-btn portfolio" title="Add to Portfolio" onclick="openWatchlistPortfolioModal('${encodeURIComponent(JSON.stringify({symbol:item.symbol, name:item.name || item.symbol, industry:item.industry || '', ltp:item.ltp || ''}))}')"><i class="fa fa-briefcase"></i></button>
           <button class="action-btn del" title="Remove" onclick="removeFromWatchlist('${encodeURIComponent(item.symbol)}', event)"><i class="fa fa-trash"></i></button>
         </div>
@@ -1371,7 +1614,9 @@ function renderWatchlistHeatmap(items) {
     tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><i class="fa fa-fire"></i><p>No watchlist data for heat map.</p></div></td></tr>`;
     return;
   }
-  tbody.innerHTML = items.map(item => `
+  const rows = getSortedRows('heatmap', items);
+  updateSortHeaderClasses('heatmap');
+  tbody.innerHTML = rows.map(item => `
     <tr>
       <td class="hm-ticker"><a href="${tradingViewUrl(item.symbol)}" target="_blank" rel="noopener noreferrer" title="Open in TradingView">${escapeHtml(item.symbol)}</a></td>
       <td class="hm-name">${escapeHtml(item.name || item.symbol)}</td>
