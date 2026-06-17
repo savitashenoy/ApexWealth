@@ -134,9 +134,12 @@ def init_db():
                         id TEXT PRIMARY KEY,
                         email TEXT UNIQUE NOT NULL,
                         password TEXT NOT NULL,
-                        created TIMESTAMPTZ DEFAULT NOW()
+                        created TIMESTAMPTZ DEFAULT NOW(),
+                        last_login TIMESTAMPTZ
                     )
                 """)
+                cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMPTZ")
+
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS holdings (
                         id TEXT PRIMARY KEY,
@@ -268,7 +271,7 @@ def db_get_user(email):
         return None
     with db_connect() as conn:
         with conn.cursor() as cur:
-            cur.execute('SELECT id, email, password, created FROM users WHERE email=%s', (email,))
+            cur.execute('SELECT id, email, password, created, last_login FROM users WHERE email=%s', (email,))
             row = cur.fetchone()
     return _row_to_dict(row) if row else None
 
@@ -278,8 +281,37 @@ def db_create_user(email, password_hash):
     user_id = str(uuid.uuid4())
     with db_connect() as conn:
         with conn.cursor() as cur:
-            cur.execute('INSERT INTO users (id, email, password, created) VALUES (%s,%s,%s,NOW())', (user_id, email, password_hash))
+            cur.execute('INSERT INTO users (id, email, password, created, last_login) VALUES (%s,%s,%s,NOW(),NULL)', (user_id, email, password_hash))
     return {'id': user_id, 'email': email}
+
+
+def db_get_user_by_id(user_id):
+    if not init_db():
+        return None
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute('SELECT id, email, password, created, last_login FROM users WHERE id=%s', (user_id,))
+            row = cur.fetchone()
+    return _row_to_dict(row) if row else None
+
+
+def db_update_last_login(user_id):
+    if not init_db():
+        return None
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute('UPDATE users SET last_login=NOW() WHERE id=%s RETURNING last_login', (user_id,))
+            row = cur.fetchone()
+    return _dt_to_str(row.get('last_login')) if row else None
+
+
+def db_update_password_by_id(user_id, password_hash):
+    if not init_db():
+        raise RuntimeError(DB_LAST_ERROR or 'Database is not initialized')
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute('UPDATE users SET password=%s WHERE id=%s', (password_hash, user_id))
+            return cur.rowcount
 
 def db_update_password(email, password_hash):
     if not init_db():
@@ -1320,7 +1352,7 @@ def signup():
     if email in users:
         return jsonify({'error': 'Email already registered'}), 409
     user_id = str(uuid.uuid4())
-    users[email] = {'id': user_id, 'email': email, 'password': hash_password(password), 'created': str(datetime.now())}
+    users[email] = {'id': user_id, 'email': email, 'password': hash_password(password), 'created': str(datetime.now()), 'last_login': None}
     save_json(USERS_FILE, users)
     return jsonify({'message': 'Account created', 'user_id': user_id, 'email': email, 'storage': 'json-fallback'})
 
@@ -1334,13 +1366,64 @@ def login():
         user = db_get_user(email)
         if not user or user['password'] != hash_password(password):
             return jsonify({'error': 'Invalid credentials'}), 401
-        return jsonify({'message': 'Login successful', 'user_id': user['id'], 'email': email, 'storage': 'neon'})
+        last_login = db_update_last_login(user['id'])
+        return jsonify({'message': 'Login successful', 'user_id': user['id'], 'email': email, 'last_login': last_login, 'storage': 'neon'})
 
     users = load_json(USERS_FILE)
     user = users.get(email)
     if not user or user['password'] != hash_password(password):
         return jsonify({'error': 'Invalid credentials'}), 401
-    return jsonify({'message': 'Login successful', 'user_id': user['id'], 'email': email, 'storage': 'json-fallback'})
+    user['last_login'] = str(datetime.now())
+    users[email] = user
+    save_json(USERS_FILE, users)
+    return jsonify({'message': 'Login successful', 'user_id': user['id'], 'email': email, 'last_login': user.get('last_login'), 'storage': 'json-fallback'})
+
+@app.route('/api/profile/<user_id>', methods=['GET'])
+def get_profile(user_id):
+    if db_configured():
+        user = db_get_user_by_id(user_id)
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        return jsonify({
+            'user_id': user.get('id'),
+            'email': user.get('email'),
+            'password': '••••••••',
+            'created': user.get('created'),
+            'last_login': user.get('last_login'),
+            'storage': 'neon'
+        })
+    users = load_json(USERS_FILE)
+    user = next((u for u in users.values() if str(u.get('id')) == str(user_id)), None)
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    return jsonify({
+        'user_id': user.get('id'),
+        'email': user.get('email'),
+        'password': '••••••••',
+        'created': user.get('created'),
+        'last_login': user.get('last_login'),
+        'storage': 'json-fallback'
+    })
+
+@app.route('/api/profile/<user_id>/password', methods=['POST'])
+def update_profile_password(user_id):
+    data = get_request_json()
+    new_pwd = str(data.get('password', '')).strip()
+    if len(new_pwd) < 4:
+        return jsonify({'error': 'Password must be at least 4 characters'}), 400
+    if db_configured():
+        if not db_get_user_by_id(user_id):
+            return jsonify({'error': 'User not found'}), 404
+        db_update_password_by_id(user_id, hash_password(new_pwd))
+        return jsonify({'message': 'Password updated', 'storage': 'neon'})
+    users = load_json(USERS_FILE)
+    for email, user in users.items():
+        if str(user.get('id')) == str(user_id):
+            user['password'] = hash_password(new_pwd)
+            users[email] = user
+            save_json(USERS_FILE, users)
+            return jsonify({'message': 'Password updated', 'storage': 'json-fallback'})
+    return jsonify({'error': 'User not found'}), 404
 
 @app.route('/api/change-password', methods=['POST'])
 def change_password():
@@ -2505,7 +2588,7 @@ def db_admin_get_user_by_id(user_id):
         return None
     with db_connect() as conn:
         with conn.cursor() as cur:
-            cur.execute('SELECT id, email, password, created FROM users WHERE id=%s', (user_id,))
+            cur.execute('SELECT id, email, password, created, last_login FROM users WHERE id=%s', (user_id,))
             row = cur.fetchone()
     return _row_to_dict(row) if row else None
 

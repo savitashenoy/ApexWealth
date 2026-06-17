@@ -655,6 +655,21 @@ body.light .score-detail-table thead th { background: #e4e0d6; }
 .watchlist-load-progress.show { display:block; }
 .watchlist-progress-track { height: 7px; border-radius: 999px; background: rgba(148,163,184,.22); overflow:hidden; margin-top: 8px; }
 .watchlist-progress-bar { height: 100%; width: 0%; border-radius: 999px; background: var(--accent); transition: width .22s ease; }
+.portfolio-load-progress { display:none; margin: 10px 0 14px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); color: var(--text-secondary); font-size: .82rem; }
+.portfolio-load-progress.show { display:block; }
+.portfolio-progress-track { height: 7px; border-radius: 999px; background: rgba(148,163,184,.22); overflow:hidden; margin-top: 8px; }
+.portfolio-progress-bar { height: 100%; width: 0%; border-radius: 999px; background: var(--accent); transition: width .22s ease; }
+.settings-grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:18px; }
+.settings-card { background:var(--card); border:1px solid var(--border); border-radius:18px; padding:18px; box-shadow: var(--shadow); }
+.settings-card-title { font-weight:900; font-size:1rem; margin-bottom:14px; color:var(--text); display:flex; align-items:center; gap:8px; }
+.profile-row { display:flex; justify-content:space-between; gap:16px; padding:12px 0; border-bottom:1px solid var(--border); }
+.profile-row:last-child { border-bottom:0; }
+.profile-label { color:var(--dim); font-size:.82rem; }
+.profile-value { color:var(--text); font-weight:800; text-align:right; word-break:break-word; }
+.settings-msg { margin-top:10px; font-size:.84rem; min-height:18px; }
+.settings-msg.ok { color:var(--green); }
+.settings-msg.err { color:var(--red); }
+@media (max-width: 900px) { .settings-grid { grid-template-columns: 1fr; } }
 .fundamental-table tbody tr.fundamental-highlight-row,
 .fundamental-table tbody tr.fundamental-highlight-row td,
 .fundamental-table tbody tr.fundamental-highlight-row td:first-child { background: #e6a043 !important; color: #1a1714 !important; font-weight: 900; }
@@ -1111,6 +1126,7 @@ body.light .screener-card, body.light .screener-tab-btn { background:#f5f2eb; }
       <button class="nav-page-btn" onclick="showPage('analysis')"><i class="fa fa-chart-line"></i> Analysis</button>
       <button class="nav-page-btn" onclick="showPage('markets')"><i class="fa fa-globe"></i> Markets</button>
       <button class="nav-page-btn" onclick="showPage('screener')"><i class="fa fa-filter"></i> Screener</button>
+      <button class="nav-page-btn" onclick="showPage('settings')"><i class="fa fa-gear"></i> Settings</button>
     </div>
     <div class="nav-user">
       <div class="nav-avatar" id="nav-avatar">U</div>
@@ -1223,6 +1239,11 @@ body.light .screener-card, body.light .screener-tab-btn { background:#f5f2eb; }
           <div class="auth-error" id="add-error" style="margin-top:8px"></div>
         </div>
 
+        <div class="portfolio-load-progress" id="holdings-load-progress">
+          <div id="holdings-load-progress-text">Loading holdings…</div>
+          <div class="portfolio-progress-track"><div class="portfolio-progress-bar" id="holdings-load-progress-bar"></div></div>
+        </div>
+
         <div class="alert-hit-panel" id="portfolio-alert-hit-panel"></div>
 
         <div class="table-wrap">
@@ -1264,6 +1285,11 @@ body.light .screener-card, body.light .screener-tab-btn { background:#f5f2eb; }
           <div class="card"><div class="card-label">Realised P&L</div><div class="card-value td-mono" id="perf-realised">₹0</div></div>
           <div class="card"><div class="card-label">Win Rate</div><div class="card-value" id="perf-win-rate">0%</div></div>
           <div class="card"><div class="card-label">Best Trade</div><div class="card-value green td-mono" id="perf-best">₹0</div></div>
+        </div>
+
+        <div class="portfolio-load-progress" id="trades-load-progress">
+          <div id="trades-load-progress-text">Loading performance report…</div>
+          <div class="portfolio-progress-track"><div class="portfolio-progress-bar" id="trades-load-progress-bar"></div></div>
         </div>
 
         <div class="chart-card" style="margin-bottom:20px">
@@ -1593,6 +1619,34 @@ body.light .screener-card, body.light .screener-tab-btn { background:#f5f2eb; }
       </div>
 
       <div class="screener-actions" style="justify-content:flex-start;margin-top:14px"><button class="btn btn-outline" onclick="screenerExportCsv()"><i class="fa fa-file-csv"></i> Export Active Results CSV</button></div>
+    </div>
+
+
+
+    <!-- SETTINGS PAGE -->
+    <div class="page" id="page-settings">
+      <div class="page-title"><i class="fa fa-gear"></i> Settings</div>
+      <div class="settings-grid">
+        <div class="settings-card">
+          <div class="settings-card-title"><i class="fa fa-user"></i> User Profile</div>
+          <div class="profile-row"><div class="profile-label">Current Username</div><div class="profile-value" id="settings-username">—</div></div>
+          <div class="profile-row"><div class="profile-label">Password</div><div class="profile-value" id="settings-password">••••••••</div></div>
+          <div class="profile-row"><div class="profile-label">Last login</div><div class="profile-value" id="settings-last-login">—</div></div>
+        </div>
+        <div class="settings-card">
+          <div class="settings-card-title"><i class="fa fa-shield-halved"></i> Security</div>
+          <div class="form-group">
+            <div class="form-label">Set New Password</div>
+            <input class="form-input" type="password" id="settings-new-password" placeholder="Enter new password" autocomplete="new-password" />
+          </div>
+          <div class="form-group">
+            <div class="form-label">Confirm New Password</div>
+            <input class="form-input" type="password" id="settings-confirm-password" placeholder="Confirm new password" autocomplete="new-password" />
+          </div>
+          <button class="btn btn-primary" onclick="updateSettingsPassword()"><i class="fa fa-key"></i> Update Password</button>
+          <div class="settings-msg" id="settings-password-msg"></div>
+        </div>
+      </div>
     </div>
 
     </div><!-- /.main -->
@@ -2060,7 +2114,7 @@ function doLogout() {
 async function showPage(name) {
   document.querySelectorAll('.nav-page-btn').forEach((b,i) => {
     b.classList.remove('active');
-    if (['dashboard','portfolio','watchlist','analysis','markets','screener'][i] === name) b.classList.add('active');
+    if (['dashboard','portfolio','watchlist','analysis','markets','screener','settings'][i] === name) b.classList.add('active');
   });
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.getElementById(`page-${name}`).classList.add('active');
@@ -2073,6 +2127,7 @@ async function loadPage(name) {
   else if (name === 'watchlist') await loadWatchlist();
   else if (name === 'markets') await loadMarkets();
   else if (name === 'screener') await screenerInit();
+  else if (name === 'settings') await loadSettings();
   else if (name === 'analysis') { if (analysisTicker) await loadAnalysisSequence(); }
 }
 
@@ -2237,22 +2292,94 @@ async function runWatchlistAlertChecksForPortfolioRefresh() {
   checkWatchlistAlerts(items || []);
 }
 
+
+function setPortfolioLoadProgress(kind, pct, message, visible = true) {
+  const wrap = document.getElementById(`${kind}-load-progress`);
+  const bar = document.getElementById(`${kind}-load-progress-bar`);
+  const text = document.getElementById(`${kind}-load-progress-text`);
+  if (!wrap) return;
+  wrap.classList.toggle('show', !!visible);
+  if (bar) bar.style.width = `${Math.max(0, Math.min(100, pct || 0))}%`;
+  if (text && message) text.textContent = message;
+}
+function hidePortfolioLoadProgress(kind, delay = 250) {
+  const wrap = document.getElementById(`${kind}-load-progress`);
+  if (!wrap) return;
+  setTimeout(() => wrap.classList.remove('show'), delay);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// SETTINGS
+// ──────────────────────────────────────────────────────────────────────────────
+function formatDateTimeDisplay(value) {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return String(value);
+  return d.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+}
+async function loadSettings() {
+  if (!USER) return;
+  const msg = document.getElementById('settings-password-msg');
+  if (msg) { msg.textContent = ''; msg.className = 'settings-msg'; }
+  document.getElementById('settings-username').textContent = USER.email || '—';
+  document.getElementById('settings-password').textContent = '••••••••';
+  document.getElementById('settings-last-login').textContent = 'Loading…';
+  try {
+    const p = await fetchJsonSafe(`${API}/profile/${USER.user_id}`, {cache:'no-store'});
+    document.getElementById('settings-username').textContent = p.email || USER.email || '—';
+    document.getElementById('settings-password').textContent = p.password || '••••••••';
+    document.getElementById('settings-last-login').textContent = formatDateTimeDisplay(p.last_login);
+    setLastUpdated('Settings');
+  } catch(err) {
+    document.getElementById('settings-last-login').textContent = '—';
+    if (msg) { msg.textContent = err.message || 'Unable to load profile'; msg.className = 'settings-msg err'; }
+  }
+}
+async function updateSettingsPassword() {
+  const msg = document.getElementById('settings-password-msg');
+  const newPwd = document.getElementById('settings-new-password').value;
+  const confirm = document.getElementById('settings-confirm-password').value;
+  if (msg) { msg.textContent = ''; msg.className = 'settings-msg'; }
+  if (!newPwd || newPwd.length < 4) { if (msg) { msg.textContent = 'Enter a password with at least 4 characters.'; msg.className = 'settings-msg err'; } return; }
+  if (newPwd !== confirm) { if (msg) { msg.textContent = 'Passwords do not match.'; msg.className = 'settings-msg err'; } return; }
+  try {
+    await fetchJsonSafe(`${API}/profile/${USER.user_id}/password`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({password:newPwd})});
+    document.getElementById('settings-new-password').value = '';
+    document.getElementById('settings-confirm-password').value = '';
+    if (msg) { msg.textContent = 'Password updated successfully.'; msg.className = 'settings-msg ok'; }
+    setLastUpdated('Password updated');
+  } catch(err) {
+    if (msg) { msg.textContent = err.message || 'Password update failed'; msg.className = 'settings-msg err'; }
+  }
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // PORTFOLIO
 // ──────────────────────────────────────────────────────────────────────────────
 async function loadPortfolio() {
   const uid = USER?.user_id;
   if (!uid) return;
-  const holdings = await fetchJsonSafe(`${API}/holdings/${uid}`, {cache:'no-store'});
-  if (!USER || USER.user_id !== uid) return;
-  holdingsData = holdings;
-  renderHoldingsTable(holdings);
-  renderPortfolioCards(holdings);
-  await loadPortfolioAlerts();
-  checkPortfolioAlerts(holdings);
-  await runWatchlistAlertChecksForPortfolioRefresh();
-  await loadTrades();
-  setLastUpdated('Portfolio');
+  setPortfolioLoadProgress('holdings', 12, 'Fetching holdings…', true);
+  try {
+    const holdings = await fetchJsonSafe(`${API}/holdings/${uid}`, {cache:'no-store'});
+    setPortfolioLoadProgress('holdings', 60, 'Rendering holdings…', true);
+    if (!USER || USER.user_id !== uid) return;
+    holdingsData = holdings;
+    renderHoldingsTable(holdings);
+    renderPortfolioCards(holdings);
+    setPortfolioLoadProgress('holdings', 78, 'Checking alerts…', true);
+    await loadPortfolioAlerts();
+    checkPortfolioAlerts(holdings);
+    await runWatchlistAlertChecksForPortfolioRefresh();
+    if (document.getElementById('tab-performance')?.classList.contains('active')) await loadTrades();
+    setPortfolioLoadProgress('holdings', 100, 'Holdings loaded', true);
+    setLastUpdated('Portfolio');
+  } catch(err) {
+    const tbody = document.getElementById('holdings-tbody');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state"><i class="fa fa-triangle-exclamation"></i><p>${escapeHtml(err.message || 'Failed to load holdings')}</p></div></td></tr>`;
+  } finally {
+    hidePortfolioLoadProgress('holdings');
+  }
 }
 
 function renderPortfolioCards(holdings) {
@@ -2808,9 +2935,17 @@ function renderAllocationCharts() {
 }
 
 async function loadTrades() {
-  const r = await fetch(`${API}/trades/${USER.user_id}`);
-  const trades = await r.json();
   const tbody = document.getElementById('trades-tbody');
+  setPortfolioLoadProgress('trades', 15, 'Fetching performance report…', true);
+  let trades = [];
+  try {
+    trades = await fetchJsonSafe(`${API}/trades/${USER.user_id}`, {cache:'no-store'});
+    setPortfolioLoadProgress('trades', 65, 'Rendering performance report…', true);
+  } catch(err) {
+    if (tbody) tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><i class="fa fa-triangle-exclamation"></i><p>${escapeHtml(err.message || 'Failed to load performance report')}</p></div></td></tr>`;
+    hidePortfolioLoadProgress('trades');
+    return;
+  }
 
   if (!trades.length) {
     tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><i class="fa fa-history"></i><p>No completed trades yet. Sell a holding to record a trade.</p></div></td></tr>`;
@@ -2818,6 +2953,8 @@ async function loadTrades() {
     document.getElementById('perf-realised').textContent = '₹0';
     document.getElementById('perf-win-rate').textContent = '0%';
     document.getElementById('perf-best').textContent = '₹0';
+    setPortfolioLoadProgress('trades', 100, 'Performance report loaded', true);
+    hidePortfolioLoadProgress('trades');
     return;
   }
 
