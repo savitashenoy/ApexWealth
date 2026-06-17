@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify, send_from_directory, Response
 from flask_cors import CORS
-import json, os, hashlib, uuid, time, operator
+import json, os, hashlib, uuid, time, operator, tempfile
 from datetime import datetime, date
 from urllib.parse import urlparse, unquote
 import html as html_lib
@@ -12,6 +12,15 @@ except Exception:  # local/dev fallback if curl_cffi is unavailable
 import yfinance as yf
 import pandas as pd
 import numpy as np
+
+try:
+    from .broker_normalizer import normalize_file, BROKER_HINTS
+    from .import_trades import match_fifo_to_apex, holding_key, trade_key
+except Exception:
+    # Vercel imports api/index.py as a module, local runs may import from cwd.
+    from broker_normalizer import normalize_file, BROKER_HINTS
+    from import_trades import match_fifo_to_apex, holding_key, trade_key
+
 try:
     import psycopg
     from psycopg.rows import dict_row
@@ -612,6 +621,45 @@ def hash_password(pwd):
 
 def get_nse_ticker(symbol):
     return f"{symbol}.NS"
+
+_TICKER_META_CACHE = None
+
+def _load_ticker_meta():
+    global _TICKER_META_CACHE
+    if _TICKER_META_CACHE is not None:
+        return _TICKER_META_CACHE
+    meta = {}
+    path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'static', 'tickers.json'))
+    try:
+        with open(path, encoding='utf-8') as f:
+            rows = json.load(f)
+        for row in rows if isinstance(rows, list) else []:
+            sym = str(row.get('symbol') or '').upper().strip()
+            if not sym:
+                continue
+            clean = _strip_exchange_suffix(sym) if '_strip_exchange_suffix' in globals() else sym.replace('.NS','').replace('.BO','')
+            meta[clean] = {
+                'symbol': clean,
+                'name': row.get('name') or clean,
+                'industry': row.get('industry') or row.get('sector') or '',
+                'sector': row.get('sector') or ''
+            }
+    except Exception:
+        meta = {}
+    _TICKER_META_CACHE = meta
+    return meta
+
+def lookup_ticker_meta(symbol):
+    sym = _strip_exchange_suffix(symbol).upper().strip() if symbol else ''
+    meta = _load_ticker_meta().get(sym)
+    if meta:
+        return dict(meta)
+    compact = ''.join(ch for ch in sym if ch.isalnum())
+    for key, val in _load_ticker_meta().items():
+        if ''.join(ch for ch in key if ch.isalnum()) == compact:
+            return dict(val)
+    return {'symbol': sym, 'name': sym, 'industry': '', 'sector': ''}
+
 
 def _strip_exchange_suffix(symbol):
     """Normalize ticker strings used by URLs, HTML attributes and Yahoo suffixes.
@@ -1409,6 +1457,125 @@ def sell_holding(user_id, holding_id):
             portfolios[user_id] = holdings
         save_json(PORTFOLIOS_FILE, portfolios)
     return jsonify({'message': 'Sold', 'trade': trade, 'remaining_qty': remaining_qty, 'storage': 'neon' if db_configured() else 'json-fallback'})
+
+# ─── IMPORT BROKER TRADES ─────────────────────────────────────────────────────
+
+BROKER_OPTIONS = ['auto'] + sorted(list(BROKER_HINTS.keys()))
+
+@app.route('/api/import-trades/brokers', methods=['GET'])
+def import_trade_brokers():
+    return jsonify({'brokers': BROKER_OPTIONS, 'dedupe_mode': 'dedup_by_symbol_date_qty_price', 'holdings_mode': 'aggregate_by_symbol'})
+
+@app.route('/api/import-trades/<user_id>', methods=['POST'])
+def import_trades_from_broker(user_id):
+    if 'file' not in request.files:
+        return jsonify({'error': 'Upload a broker CSV file.'}), 400
+    upload = request.files['file']
+    if not upload or not upload.filename:
+        return jsonify({'error': 'Upload a broker CSV file.'}), 400
+    filename = upload.filename
+    if not filename.lower().endswith('.csv'):
+        return jsonify({'error': 'Only CSV broker tradebook/P&L files are supported for import.'}), 400
+    broker = (request.form.get('broker') or 'auto').strip().lower() or 'auto'
+    if broker not in BROKER_OPTIONS:
+        broker = 'auto'
+
+    tmp_path = None
+    try:
+        fd, tmp_path = tempfile.mkstemp(prefix='apexwealth_broker_', suffix='.csv')
+        os.close(fd)
+        upload.save(tmp_path)
+        parsed = normalize_file(tmp_path, broker=broker)
+        open_holdings, closed_trades, match_warnings = match_fifo_to_apex(parsed.trades, lookup_ticker_meta, aggregate_holdings=True)
+
+        warnings = []
+        warnings.extend(parsed.warnings or [])
+        warnings.extend(match_warnings or [])
+
+        if db_configured():
+            existing_holdings = db_get_holdings(user_id) or []
+            existing_trades = db_get_trades(user_id) or []
+        else:
+            portfolios = load_json(PORTFOLIOS_FILE)
+            trades_blob = load_json(TRADES_FILE)
+            existing_holdings = portfolios.get(user_id, [])
+            existing_trades = trades_blob.get(user_id, [])
+
+        existing_h_keys = {holding_key(h) for h in existing_holdings}
+        existing_t_keys = {trade_key(t) for t in existing_trades}
+        holdings_added = 0
+        trades_added = 0
+        holdings_skipped = 0
+        trades_skipped = 0
+
+        if db_configured():
+            for h in open_holdings:
+                if holding_key(h) in existing_h_keys:
+                    holdings_skipped += 1
+                    continue
+                h = {**h, 'id': str(uuid.uuid4()), 'date': h.get('date') or str(date.today())}
+                db_add_holding(user_id, h)
+                existing_h_keys.add(holding_key(h))
+                holdings_added += 1
+            for t in closed_trades:
+                if trade_key(t) in existing_t_keys:
+                    trades_skipped += 1
+                    continue
+                t = {**t, 'id': str(uuid.uuid4())}
+                db_add_trade(user_id, t)
+                existing_t_keys.add(trade_key(t))
+                trades_added += 1
+        else:
+            portfolios = load_json(PORTFOLIOS_FILE)
+            trades_blob = load_json(TRADES_FILE)
+            portfolios.setdefault(user_id, [])
+            trades_blob.setdefault(user_id, [])
+            for h in open_holdings:
+                if holding_key(h) in existing_h_keys:
+                    holdings_skipped += 1
+                    continue
+                h = {**h, 'id': str(uuid.uuid4()), 'date': h.get('date') or str(date.today())}
+                portfolios[user_id].append(h)
+                existing_h_keys.add(holding_key(h))
+                holdings_added += 1
+            for t in closed_trades:
+                if trade_key(t) in existing_t_keys:
+                    trades_skipped += 1
+                    continue
+                t = {**t, 'id': str(uuid.uuid4())}
+                trades_blob[user_id].append(t)
+                existing_t_keys.add(trade_key(t))
+                trades_added += 1
+            save_json(PORTFOLIOS_FILE, portfolios)
+            save_json(TRADES_FILE, trades_blob)
+
+        if holdings_skipped or trades_skipped:
+            warnings.append(f'Duplicate protection skipped {holdings_skipped} holdings and {trades_skipped} closed trades already present for this user.')
+
+        return jsonify({
+            'message': 'Import completed',
+            'detected_broker': parsed.detected_broker,
+            'source_format': parsed.source_format,
+            'header_row': parsed.header_row,
+            'mapping': parsed.mapping,
+            'warnings': warnings,
+            'holdings_added': holdings_added,
+            'trades_added': trades_added,
+            'holdings_skipped': holdings_skipped,
+            'trades_skipped': trades_skipped,
+            'normalized_rows': int(len(parsed.trades)) if hasattr(parsed.trades, '__len__') else 0,
+            'dedupe_mode': 'dedup_by_symbol_date_qty_price',
+            'holdings_mode': 'aggregate_by_symbol',
+            'storage': 'neon' if db_configured() else 'json-fallback'
+        })
+    except Exception as exc:
+        return jsonify({'error': str(exc) or 'Import failed'}), 500
+    finally:
+        if tmp_path:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
 
 # ─── WATCHLIST ────────────────────────────────────────────────────────────────
 

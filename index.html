@@ -1194,7 +1194,7 @@ body.light .screener-card, body.light .screener-tab-btn { background:#f5f2eb; }
       <!-- HOLDINGS TAB -->
       <div class="tab-content active" id="tab-holdings">
         <div class="add-position-section">
-          <div class="add-pos-title"><i class="fa fa-plus"></i> Add Position</div>
+          <div class="add-pos-title" style="display:flex;align-items:center;gap:10px;justify-content:space-between"><span><i class="fa fa-plus"></i> Add Position</span><button class="btn btn-outline" onclick="openImportTradesModal()" style="padding:7px 11px"><i class="fa fa-file-import"></i> Import Trades</button></div>
           <div class="add-pos-grid">
             <div class="form-group">
               <div class="form-label">Date</div>
@@ -1600,6 +1600,39 @@ body.light .screener-card, body.light .screener-tab-btn { background:#f5f2eb; }
 </div><!-- /#app -->
 
 <!-- SELL MODAL -->
+
+<div class="modal-overlay" id="import-trades-modal">
+  <div class="modal">
+    <div class="modal-title">◈ Import Broker Trades</div>
+    <div class="modal-form">
+      <div class="form-group">
+        <div class="form-label">Broker</div>
+        <select class="form-input" id="import-broker">
+          <option value="auto">Auto Detect</option>
+          <option value="zerodha">Zerodha</option>
+          <option value="dhan">Dhan</option>
+          <option value="angelone">Angel One</option>
+          <option value="groww">Groww</option>
+          <option value="upstox">Upstox</option>
+          <option value="icici">ICICI</option>
+          <option value="kotak">Kotak</option>
+          <option value="generic">Generic</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <div class="form-label">Broker CSV file</div>
+        <input class="form-input" type="file" id="import-trades-file" accept=".csv,text/csv"/>
+      </div>
+      <div class="auth-error" id="import-trades-error"></div>
+      <div class="import-summary" id="import-trades-summary" style="display:none;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--bg-card-hover);font-size:13px;line-height:1.5"></div>
+      <div class="modal-btns">
+        <button class="btn btn-outline" onclick="closeImportTradesModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="importBrokerTrades()"><i class="fa fa-file-import"></i> Import</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="sell-modal">
   <div class="modal">
     <div class="modal-title">◈ Sell Position</div>
@@ -2553,6 +2586,63 @@ async function deleteHolding(id, ev) {
   await loadPortfolio();
   await loadDashboard();
   setLastUpdated('Holding removed');
+}
+
+
+// IMPORT BROKER TRADES MODAL
+function openImportTradesModal() {
+  const err = document.getElementById('import-trades-error');
+  const summary = document.getElementById('import-trades-summary');
+  if (err) err.textContent = '';
+  if (summary) { summary.style.display = 'none'; summary.innerHTML = ''; }
+  const file = document.getElementById('import-trades-file');
+  if (file) file.value = '';
+  document.getElementById('import-trades-modal').classList.add('open');
+}
+function closeImportTradesModal() { document.getElementById('import-trades-modal').classList.remove('open'); }
+
+async function importBrokerTrades() {
+  const err = document.getElementById('import-trades-error');
+  const summary = document.getElementById('import-trades-summary');
+  const btn = document.querySelector('#import-trades-modal .btn-primary');
+  err.textContent = '';
+  summary.style.display = 'none';
+  summary.innerHTML = '';
+  if (!USER) { err.textContent = 'Login required'; return; }
+  const fileInput = document.getElementById('import-trades-file');
+  if (!fileInput.files || !fileInput.files[0]) { err.textContent = 'Select a broker CSV file'; return; }
+  const fd = new FormData();
+  fd.append('file', fileInput.files[0]);
+  fd.append('broker', document.getElementById('import-broker').value || 'auto');
+  const old = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Importing…';
+  try {
+    const data = await fetchJsonSafe(`${API}/import-trades/${encodeURIComponent(USER.user_id)}`, {
+      method: 'POST',
+      body: fd,
+      cache: 'no-store'
+    });
+    const warnings = Array.isArray(data.warnings) && data.warnings.length
+      ? `<div style="margin-top:8px"><strong>Warnings:</strong><ul style="margin:6px 0 0 18px">${data.warnings.map(w => `<li>${escapeHtml(String(w))}</li>`).join('')}</ul></div>`
+      : '';
+    summary.innerHTML = `
+      <strong>Imported ${Number(data.holdings_added || 0)} holdings and ${Number(data.trades_added || 0)} closed trades</strong><br>
+      Detected broker: <strong>${escapeHtml(data.detected_broker || 'generic')}</strong><br>
+      Source format: ${escapeHtml(data.source_format || 'tradebook')} · Rows parsed: ${Number(data.normalized_rows || 0)}<br>
+      Duplicate skipped: ${Number(data.holdings_skipped || 0)} holdings, ${Number(data.trades_skipped || 0)} closed trades
+      ${warnings}`;
+    summary.style.display = 'block';
+    await loadPortfolio();
+    await loadTrades();
+    await loadDashboard();
+    setLastUpdated('Broker trades imported');
+  } catch(e) {
+    err.textContent = e.message || 'Import failed';
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = old;
+  }
 }
 
 // SELL MODAL
