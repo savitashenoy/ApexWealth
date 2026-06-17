@@ -494,7 +494,7 @@ function renderHoldingsTable(holdings) {
       <td class="td-symbol">${h.symbol}</td>
       <td class="td-mono">₹${h.buy_price}</td>
       <td class="td-mono">${h.qty}</td>
-      <td class="td-mono">₹${h.ltp}</td>
+      <td class="td-mono">${h.ltp == null || h.ltp === '' || Number.isNaN(Number(h.ltp)) ? '—' : '₹' + h.ltp}</td>
       <td class="td-mono">₹${fmtNum(h.invested)}</td>
       <td class="td-mono">₹${fmtNum(h.curr_value)}</td>
       <td class="td-mono ${h.pnl >= 0 ? 'td-green' : 'td-red'}">${h.pnl >= 0 ? '+' : ''}₹${fmtNum(h.pnl)}</td>
@@ -512,6 +512,50 @@ function renderHoldingsTable(holdings) {
   `).join('');
 }
 
+
+
+function localEnrichHolding(h) {
+  const buy = Number(h.buy_price || 0);
+  const qty = Number(h.qty || 0);
+  const invested = buy * qty;
+  const ltpNum = Number(h.ltp);
+  const quoteOk = Number.isFinite(ltpNum) && ltpNum > 0 && h.quote_ok !== false;
+  const currValue = quoteOk ? ltpNum * qty : invested;
+  const pnl = currValue - invested;
+  const pnlPct = invested ? (pnl / invested) * 100 : 0;
+  return {
+    ...h,
+    buy_price: Number.isFinite(buy) ? buy : 0,
+    qty: Number.isFinite(qty) ? qty : 0,
+    ltp: quoteOk ? Number(ltpNum.toFixed ? ltpNum.toFixed(2) : ltpNum) : null,
+    quote_ok: quoteOk,
+    day_chg_pct: Number(h.day_chg_pct || 0),
+    invested: Number(invested.toFixed(2)),
+    curr_value: Number(currValue.toFixed(2)),
+    pnl: Number(pnl.toFixed(2)),
+    pnl_pct: Number(pnlPct.toFixed(2))
+  };
+}
+
+function fastRenderPortfolio(reason) {
+  holdingsData = (holdingsData || []).map(localEnrichHolding);
+  renderHoldingsTable(holdingsData);
+  renderPortfolioCards(holdingsData);
+  if (reason) setLastUpdated(reason);
+}
+
+function refreshPortfolioInBackground(reason) {
+  // Do not block Add/Edit/Sell modals on slow quote refreshes. The UI updates
+  // immediately using local data, then Yahoo/Neon refresh runs quietly.
+  setTimeout(() => {
+    loadPortfolio().then(() => {
+      if (reason) setLastUpdated(reason);
+    }).catch(err => console.warn('Background portfolio refresh failed', err));
+  }, 50);
+  setTimeout(() => {
+    if (typeof loadDashboard === 'function') loadDashboard().catch(() => {});
+  }, 150);
+}
 
 function compareAlertValue(actual, op, threshold) {
   const a = Number(actual), t = Number(threshold);
@@ -729,23 +773,45 @@ async function addHolding() {
   if (!price || price <= 0) { errEl.textContent = 'Enter a valid buy price'; return; }
   if (!qty || qty <= 0) { errEl.textContent = 'Enter a valid quantity'; return; }
 
-  const r = await fetch(`${API}/holdings/${USER.user_id}`, {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({symbol: selectedTicker.symbol, name: selectedTicker.name,
-      buy_price: price, qty, date, industry: selectedTicker.industry})
+  const tempId = `tmp-${Date.now()}`;
+  const optimistic = localEnrichHolding({
+    id: tempId,
+    symbol: selectedTicker.symbol,
+    name: selectedTicker.name,
+    buy_price: price,
+    qty,
+    date,
+    industry: selectedTicker.industry || '',
+    sector: '',
+    ltp: null,
+    quote_ok: false,
+    day_chg_pct: 0
   });
-  if (r.ok) {
-    document.getElementById('add-ticker').value = '';
-    document.getElementById('add-price').value = '';
-    document.getElementById('add-qty').value = '';
-    document.getElementById('add-date').value = new Date().toISOString().split('T')[0];
-    selectedTicker = null;
-    await loadPortfolio();
-    setLastUpdated('Holding added');
-    await loadDashboard();
-  } else {
-    const d = await r.json();
-    errEl.textContent = d.error || 'Error adding holding';
+  holdingsData = [...(holdingsData || []), optimistic];
+  fastRenderPortfolio('Adding holding...');
+
+  document.getElementById('add-ticker').value = '';
+  document.getElementById('add-price').value = '';
+  document.getElementById('add-qty').value = '';
+  document.getElementById('add-date').value = new Date().toISOString().split('T')[0];
+  const savedTicker = selectedTicker;
+  selectedTicker = null;
+
+  try {
+    const d = await fetchJsonSafe(`${API}/holdings/${encodeURIComponent(USER.user_id)}`, {
+      method: 'POST', headers: {'Content-Type':'application/json'}, cache:'no-store',
+      body: JSON.stringify({symbol: savedTicker.symbol, name: savedTicker.name,
+        buy_price: price, qty, date, industry: savedTicker.industry})
+    });
+    if (d && d.holding) {
+      holdingsData = (holdingsData || []).map(h => String(h.id) === tempId ? localEnrichHolding(d.holding) : h);
+      fastRenderPortfolio('Holding added');
+    }
+    refreshPortfolioInBackground('Holding added');
+  } catch(e) {
+    holdingsData = (holdingsData || []).filter(h => String(h.id) !== tempId);
+    fastRenderPortfolio('Add failed');
+    errEl.textContent = e.message || 'Error adding holding';
   }
 }
 
@@ -786,22 +852,43 @@ async function confirmSell() {
   if (!sell_price || sell_price <= 0) { document.getElementById('sell-error').textContent = 'Enter a valid sell price'; return; }
   if (!sell_qty || sell_qty <= 0) { document.getElementById('sell-error').textContent = 'Enter a valid sell quantity'; return; }
   if (sellMaxQty && sell_qty > sellMaxQty) { document.getElementById('sell-error').textContent = `Sell quantity cannot exceed available quantity (${sellMaxQty})`; return; }
+
+  const prevHoldings = [...(holdingsData || [])];
+  const target = (holdingsData || []).find(h => String(h.id) === String(sellHoldingId));
+  if (target) {
+    const remaining = Math.max(0, Number(target.qty || 0) - sell_qty);
+    holdingsData = remaining <= 0
+      ? (holdingsData || []).filter(h => String(h.id) !== String(sellHoldingId))
+      : (holdingsData || []).map(h => String(h.id) === String(sellHoldingId) ? localEnrichHolding({...h, qty: remaining}) : h);
+    fastRenderPortfolio('Selling holding...');
+  }
+
   const btn = document.querySelector('#sell-modal .btn-primary');
   const origText = btn.textContent;
   btn.innerHTML = '<div class="spinner" style="margin:0;border-top-color:#000"></div>';
   btn.disabled = true;
   document.getElementById('sell-error').textContent = '';
+  closeSellModal();
+
   try {
-    const r = await fetch(`${API}/sell/${USER.user_id}/${sellHoldingId}`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
+    const d = await fetchJsonSafe(`${API}/sell/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(sellHoldingId)}`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, cache:'no-store',
       body: JSON.stringify({sell_price, qty: sell_qty})
     });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error || 'Sell failed');
-    closeSellModal();
-    await loadPortfolio();
+    if (d && typeof d.remaining_qty !== 'undefined') {
+      const remaining = Number(d.remaining_qty || 0);
+      holdingsData = remaining <= 0
+        ? (holdingsData || []).filter(h => String(h.id) !== String(sellHoldingId))
+        : (holdingsData || []).map(h => String(h.id) === String(sellHoldingId) ? localEnrichHolding({...h, qty: remaining}) : h);
+      fastRenderPortfolio('Holding sold');
+    }
+    loadTrades().catch(() => {});
+    refreshPortfolioInBackground('Holding sold');
   } catch(err) {
+    holdingsData = prevHoldings;
+    fastRenderPortfolio('Sell failed');
     document.getElementById('sell-error').textContent = err.message || 'Network error — try again';
+    document.getElementById('sell-modal').classList.add('open');
   } finally {
     btn.innerHTML = origText;
     btn.disabled = false;
@@ -825,14 +912,26 @@ async function confirmEdit() {
   const price = parseFloat(document.getElementById('edit-price').value);
   const qty = parseFloat(document.getElementById('edit-qty').value);
   const date = document.getElementById('edit-date').value;
-  if (!price || !qty) { document.getElementById('edit-error').textContent = 'Fill all fields'; return; }
-  const r = await fetch(`${API}/holdings/${USER.user_id}/${editHoldingId}`, {
-    method:'PUT', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({buy_price: price, qty, date})
-  });
-  if (r.ok) {
-    closeEditModal();
-    await loadPortfolio();
+  const errEl = document.getElementById('edit-error');
+  errEl.textContent = '';
+  if (!price || !qty) { errEl.textContent = 'Fill all fields'; return; }
+
+  const prevHoldings = [...(holdingsData || [])];
+  holdingsData = (holdingsData || []).map(h => String(h.id) === String(editHoldingId) ? localEnrichHolding({...h, buy_price: price, qty, date}) : h);
+  closeEditModal();
+  fastRenderPortfolio('Holding updated');
+
+  try {
+    await fetchJsonSafe(`${API}/holdings/${encodeURIComponent(USER.user_id)}/${encodeURIComponent(editHoldingId)}`, {
+      method:'PUT', headers:{'Content-Type':'application/json'}, cache:'no-store',
+      body: JSON.stringify({buy_price: price, qty, date})
+    });
+    refreshPortfolioInBackground('Holding updated');
+  } catch(e) {
+    holdingsData = prevHoldings;
+    fastRenderPortfolio('Edit failed');
+    errEl.textContent = e.message || 'Update failed';
+    document.getElementById('edit-modal').classList.add('open');
   }
 }
 
