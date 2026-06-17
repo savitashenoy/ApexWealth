@@ -1100,6 +1100,14 @@ body.light .screener-card, body.light .screener-tab-btn { background:#f5f2eb; }
 @media (max-width: 980px) { .screener-hero { grid-template-columns:1fr; } .screener-controls { grid-template-columns:repeat(2,1fr); } .screener-top-controls { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 620px) { .screener-controls, .screener-top-controls, .screener-volume-conditions, .screener-ema-conditions, .screener-compact-conditions, .screener-filter-conditions, .screener-pa-filters, .screener-condition-header, .screener-condition-row { grid-template-columns:1fr; } }
 
+
+
+/* ── MARKETS: PULLERS & DRAGGERS ── */
+.pd-shell{background:linear-gradient(180deg,rgba(41,121,255,.05),rgba(0,230,118,.025));border:1px solid var(--border);border-radius:14px;padding:18px;box-shadow:0 12px 34px var(--shadow)}
+.pd-title-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:16px}.pd-title-row h2{font-size:1.45rem;margin:0 0 4px;font-weight:900;color:var(--text)}.pd-title-row p{margin:0;color:var(--text-secondary);font-size:.86rem}.pd-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}.pd-badge{background:var(--hover);color:var(--text-secondary);border-radius:8px;padding:8px 10px;font-size:.76rem;border:1px solid var(--border);white-space:nowrap;font-family:'JetBrains Mono',monospace}.pd-tabs{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap}.pd-tab{border:1px solid var(--border);background:var(--card);border-radius:9px;padding:8px 14px;font-weight:900;cursor:pointer;color:var(--text);font-family:'Syne',sans-serif}.pd-tab:hover,.pd-tab.active{background:rgba(41,121,255,.12);border-color:var(--accent);box-shadow:inset 0 2px 0 var(--accent)}.pd-summary-grid{display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-bottom:14px}.pd-card{background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 24px var(--shadow);padding:16px}.pd-index-line{display:flex;align-items:center;justify-content:space-between;gap:12px}.pd-muted{color:var(--dim)}.pd-big-value{font-family:'JetBrains Mono',monospace;font-size:1.65rem;font-weight:900;letter-spacing:-.03em;margin:4px 0;color:var(--text)}.pd-small{font-size:.82rem;font-weight:900;font-family:'JetBrains Mono',monospace}.pd-updated{text-align:right;color:var(--text-secondary);font-size:.75rem;font-family:'JetBrains Mono',monospace}.pd-gauge-card{position:relative;min-height:108px;display:grid;grid-template-columns:1fr auto;align-items:center}.pd-gauge-center{position:absolute;top:12px;left:0;right:0;text-align:center;font-family:'JetBrains Mono',monospace}.pd-half-donut{width:132px;height:78px;margin:12px auto 0;grid-column:1 / span 2}.pd-half-donut svg{width:100%;height:100%;display:block}.pd-donut-track,.pd-donut-pull,.pd-donut-drag{fill:none;stroke-linecap:butt;stroke-width:15}.pd-donut-track{stroke:var(--border)}.pd-donut-pull{stroke:var(--green);stroke-dasharray:0 100}.pd-donut-drag{stroke:var(--red);stroke-dasharray:0 100}.pd-pull-drag-text{position:absolute;right:18px;bottom:18px;font-size:.75rem;line-height:1.8;text-align:left;font-family:'JetBrains Mono',monospace}.pd-progress{height:3px;background:var(--border);border-radius:99px;overflow:hidden;margin:0 0 12px}.pd-progress div{height:100%;background:linear-gradient(90deg,var(--accent),var(--green));animation:pdProgress 1s ease-in-out infinite}@keyframes pdProgress{0%{width:15%;margin-left:-15%}50%{width:55%;margin-left:35%}100%{width:15%;margin-left:100%}}.pd-tables-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.pd-table-caption{font-weight:900;margin:0 0 8px}.pd-table-wrap{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--card)}.pd-table-wrap table{width:100%;border-collapse:collapse}.pd-table-wrap thead th{font-size:.75rem;text-align:left;padding:0;font-weight:900}.pd-table-wrap tbody td{padding:10px 10px;border-top:1px solid var(--border);font-weight:800;font-size:.78rem}.pd-table-wrap tbody tr:hover{background:var(--hover)}.pd-pull-table thead{background:rgba(0,230,118,.12);color:var(--green)}.pd-drag-table thead{background:rgba(255,82,82,.12);color:var(--red)}.pd-num{text-align:right;font-variant-numeric:tabular-nums;font-family:'JetBrains Mono',monospace}.pd-symbol{font-weight:900;color:var(--text)}.pd-empty-row td{text-align:center;color:var(--dim);padding:30px}.pd-sort-th{width:100%;border:0;background:transparent;color:inherit;font:inherit;font-weight:900;text-align:left;padding:11px 10px;cursor:pointer;display:flex;align-items:center;gap:5px}.pd-sort-th:hover{background:rgba(255,255,255,.08)}.pd-sort-th.active-sort .pd-sort-mark{font-weight:900}.pd-sort-mark{font-size:.72rem;opacity:.9}.pd-company{font-size:.68rem;color:var(--dim);font-weight:700;margin-top:2px;max-width:210px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.light .pd-shell{background:linear-gradient(180deg,#f5f2eb,#edeae2)}body.light .pd-tab:hover,body.light .pd-tab.active{background:#dbeaf5}body.light .pd-pull-table thead{background:#e4f1e8}body.light .pd-drag-table thead{background:#f5dfdd}
+@media (max-width:980px){.pd-title-row{flex-direction:column}.pd-toolbar{justify-content:flex-start}.pd-summary-grid,.pd-tables-grid{grid-template-columns:1fr}.pd-gauge-card{min-height:130px}.pd-pull-drag-text{position:static;grid-column:1 / span 2;text-align:center;margin-top:-10px}}
+
 </style>
 </head>
 <body class="light">
@@ -1548,40 +1556,98 @@ body.light .screener-card, body.light .screener-tab-btn { background:#f5f2eb; }
       </div>
     </div>
 
+
     <!-- MARKETS PAGE -->
     <div class="page" id="page-markets">
       <div class="page-title"><i class="fa fa-globe"></i> Markets</div>
-      <div class="market-index-widget">
-        <div class="market-index-tabs" id="market-index-tabs">
-          <button class="market-index-tab active">Loading…</button>
+      <section class="pd-shell">
+        <div class="pd-title-row">
+          <div>
+            <h2>Pullers & Draggers</h2>
+            <p>Stocks contributing positively or negatively to index movement</p>
+          </div>
+          <div class="pd-toolbar">
+            <span class="pd-badge" id="pd-market-status">Market Closed</span>
+            <button class="btn-secondary" onclick="loadMarkets(true)"><i class="fa fa-rotate-right"></i> Refresh</button>
+            <select id="pd-refresh-seconds" class="input-sm" title="Auto refresh interval" onchange="setupPullerDraggerAutoRefresh()">
+              <option value="15">15s</option>
+              <option value="30">30s</option>
+              <option value="60" selected>60s</option>
+            </select>
+          </div>
         </div>
-        <div class="market-index-summary">
-          <div class="market-stat"><span>Today's Low</span><strong id="market-day-low">—</strong></div>
-          <div class="market-stat"><span>Today's High</span><strong id="market-day-high">—</strong></div>
-          <div class="market-stat"><span>Today's Return</span><strong id="market-day-return">—</strong></div>
-        </div>
-        <div class="market-chart-wrap">
-          <canvas id="market-index-chart"></canvas>
-        </div>
-        <div class="market-period-btns" id="market-period-btns">
-          <button class="market-period-btn active" onclick="setMarketPeriod('1d', this)">1D</button>
-          <button class="market-period-btn" onclick="setMarketPeriod('1w', this)">1W</button>
-          <button class="market-period-btn" onclick="setMarketPeriod('1m', this)">1M</button>
-          <button class="market-period-btn" onclick="setMarketPeriod('1y', this)">1Y</button>
-        </div>
-      </div>
-      <div class="movers-grid">
-        <div class="movers-card">
-          <div class="movers-title green"><i class="fa fa-arrow-up"></i> Top Gainers (NIFTY 50)</div>
-          <div id="gainers-list"><div class="loading-overlay"><div class="spinner"></div></div></div>
-        </div>
-        <div class="movers-card">
-          <div class="movers-title red"><i class="fa fa-arrow-down"></i> Top Losers (NIFTY 50)</div>
-          <div id="losers-list"><div class="loading-overlay"><div class="spinner"></div></div></div>
-        </div>
-      </div>
-    </div>
 
+        <div class="pd-tabs" id="pd-index-tabs">
+          <button class="pd-tab active" data-index="nifty" onclick="selectPullerDraggerIndex('nifty', this)">Nifty</button>
+          <button class="pd-tab" data-index="banknifty" onclick="selectPullerDraggerIndex('banknifty', this)">Banknifty</button>
+          <button class="pd-tab" data-index="sensex" onclick="selectPullerDraggerIndex('sensex', this)">Sensex</button>
+        </div>
+
+        <div class="pd-summary-grid">
+          <div class="pd-card pd-index-card">
+            <div class="pd-muted" id="pd-index-name">Nifty 50</div>
+            <div class="pd-index-line">
+              <div>
+                <div class="pd-big-value" id="pd-index-value">—</div>
+                <div class="td-green pd-small" id="pd-index-change">—</div>
+              </div>
+              <div class="pd-updated">Last Updated<br><strong id="pd-last-updated">—</strong></div>
+            </div>
+          </div>
+          <div class="pd-card pd-gauge-card">
+            <div class="pd-gauge-center"><strong><span class="td-green" id="pd-pull-count">0</span> / <span class="td-red" id="pd-drag-count">0</span></strong></div>
+            <div class="pd-half-donut" aria-label="Pullers and draggers count chart">
+              <svg viewBox="0 0 120 70" role="img">
+                <path class="pd-donut-track" d="M 15 60 A 45 45 0 0 1 105 60" pathLength="100"></path>
+                <path class="pd-donut-pull" id="pd-donut-pull" d="M 15 60 A 45 45 0 0 1 105 60" pathLength="100"></path>
+                <path class="pd-donut-drag" id="pd-donut-drag" d="M 15 60 A 45 45 0 0 1 105 60" pathLength="100"></path>
+              </svg>
+            </div>
+            <div class="pd-pull-drag-text">
+              <div>Pull: <b class="td-green" id="pd-pull-total">+0.00</b></div>
+              <div>Drag: <b class="td-red" id="pd-drag-total">-0.00</b></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="pd-progress" id="pd-loading" style="display:none"><div></div></div>
+
+        <section class="pd-tables-grid">
+          <div>
+            <div class="pd-table-caption td-green">Pullers (<span id="pd-pullers-title-count">0</span>) <span class="pd-muted">+ <span id="pd-unchanged-count">0</span> unchanged</span></div>
+            <div class="pd-table-wrap pd-pull-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th><button class="pd-sort-th" data-table="pullers" data-key="symbol" onclick="sortPullerDraggerTable('pullers','symbol')">Symbol <span class="pd-sort-mark">⇅</span></button></th>
+                    <th><button class="pd-sort-th" data-table="pullers" data-key="rate" onclick="sortPullerDraggerTable('pullers','rate')">Rate <span class="pd-sort-mark">⇅</span></button></th>
+                    <th><button class="pd-sort-th" data-table="pullers" data-key="change_pct" onclick="sortPullerDraggerTable('pullers','change_pct')">Change % <span class="pd-sort-mark">⇅</span></button></th>
+                    <th><button class="pd-sort-th active-sort" data-table="pullers" data-key="w_point" onclick="sortPullerDraggerTable('pullers','w_point')">W Point <span class="pd-sort-mark">↓</span></button></th>
+                  </tr>
+                </thead>
+                <tbody id="pd-pullers-body"><tr><td colspan="4"><div class="loading-overlay"><div class="spinner"></div>Loading...</div></td></tr></tbody>
+              </table>
+            </div>
+          </div>
+          <div>
+            <div class="pd-table-caption td-red">Draggers (<span id="pd-draggers-title-count">0</span>)</div>
+            <div class="pd-table-wrap pd-drag-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th><button class="pd-sort-th" data-table="draggers" data-key="symbol" onclick="sortPullerDraggerTable('draggers','symbol')">Symbol <span class="pd-sort-mark">⇅</span></button></th>
+                    <th><button class="pd-sort-th" data-table="draggers" data-key="rate" onclick="sortPullerDraggerTable('draggers','rate')">Rate <span class="pd-sort-mark">⇅</span></button></th>
+                    <th><button class="pd-sort-th" data-table="draggers" data-key="change_pct" onclick="sortPullerDraggerTable('draggers','change_pct')">Change % <span class="pd-sort-mark">⇅</span></button></th>
+                    <th><button class="pd-sort-th active-sort" data-table="draggers" data-key="w_point" onclick="sortPullerDraggerTable('draggers','w_point')">W Point <span class="pd-sort-mark">↑</span></button></th>
+                  </tr>
+                </thead>
+                <tbody id="pd-draggers-body"><tr><td colspan="4"><div class="loading-overlay"><div class="spinner"></div>Loading...</div></td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </section>
+    </div>
 
 
     <!-- SCREENER PAGE -->
@@ -4024,126 +4090,144 @@ async function loadAnalysis() {
 
 
 // ──────────────────────────────────────────────────────────────────────────────
-// MARKETS
+// MARKETS - PULLERS & DRAGGERS
 // ──────────────────────────────────────────────────────────────────────────────
-async function loadMarkets() {
-  // Index tabs + chart
-  try {
-    const r = await fetch(`${API}/market/indices`);
-    marketIndicesData = await r.json();
-    if (!marketIndicesData || !marketIndicesData.length) throw new Error('No index data');
-    if (!marketIndicesData.some(i => i.key === selectedMarketIndex)) selectedMarketIndex = marketIndicesData[0].key;
-    renderMarketIndexTabs();
-    await renderMarketIndexChart();
-  } catch(e) {
-    document.getElementById('market-index-tabs').innerHTML = '<button class="market-index-tab active">Unable to load index data</button>';
-  }
+let pdCurrentIndex = 'nifty';
+let pdLatestData = null;
+let pdAutoRefreshTimer = null;
+const pdSortState = {
+  pullers: { key: 'w_point', dir: 'desc' },
+  draggers: { key: 'w_point', dir: 'asc' }
+};
 
-  // Movers
-  try {
-    const r = await fetch(`${API}/market/top-movers`);
-    const {gainers, losers} = await r.json();
-    document.getElementById('gainers-list').innerHTML = gainers.map(g => `
-      <div class="mover-item">
-        <div><div class="mover-symbol">${g.symbol}</div><div style="font-size:.75rem;color:var(--dim)">₹${g.ltp}</div></div>
-        <div class="mover-pct green">+${g.day_chg_pct}%</div>
-      </div>
-    `).join('') || '<div style="padding:20px;color:var(--dim);text-align:center">No data</div>';
-    document.getElementById('losers-list').innerHTML = losers.map(g => `
-      <div class="mover-item">
-        <div><div class="mover-symbol">${g.symbol}</div><div style="font-size:.75rem;color:var(--dim)">₹${g.ltp}</div></div>
-        <div class="mover-pct red">${g.day_chg_pct}%</div>
-      </div>
-    `).join('') || '<div style="padding:20px;color:var(--dim);text-align:center">No data</div>';
-  } catch(e) {}
+function pdFmt(value) {
+  const n = Number(value || 0);
+  return n.toLocaleString('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 2 });
 }
-
-function renderMarketIndexTabs() {
-  const host = document.getElementById('market-index-tabs');
-  host.innerHTML = marketIndicesData.map(idx => {
-    const up = (idx.chg_pct || 0) >= 0;
-    return `
-      <button class="market-index-tab ${idx.key === selectedMarketIndex ? 'active' : ''}" onclick="selectMarketIndex('${idx.key}')">
-        <span class="market-tab-name">${idx.name}</span>
-        <span class="market-tab-value">${fmt(idx.value)}</span>
-        <span class="market-tab-change ${up ? 'td-green' : 'td-red'}">${up ? '+' : ''}${fmt(idx.chg)} (${up ? '+' : ''}${idx.chg_pct}%)</span>
-      </button>
-    `;
-  }).join('');
-  updateMarketSummary();
+function pdSigned(value) {
+  const n = Number(value || 0);
+  return `${n >= 0 ? '+' : ''}${pdFmt(n)}`;
 }
-
-function updateMarketSummary() {
-  const idx = marketIndicesData.find(i => i.key === selectedMarketIndex) || marketIndicesData[0];
-  if (!idx) return;
-  const ret = idx[`ret_${selectedMarketPeriod}`] ?? idx.chg_pct ?? 0;
-  document.getElementById('market-day-low').textContent = `₹${fmt(idx.day_low)}`;
-  document.getElementById('market-day-high').textContent = `₹${fmt(idx.day_high)}`;
-  const retEl = document.getElementById('market-day-return');
-  retEl.textContent = `${ret >= 0 ? '+' : ''}${ret}%`;
-  retEl.className = ret >= 0 ? 'td-green' : 'td-red';
+function pdRowHtml(row, tone) {
+  const pctClass = Number(row.change_pct || 0) >= 0 ? 'td-green' : 'td-red';
+  return `
+    <tr>
+      <td><div class="pd-symbol">${escapeHtml(row.symbol || '')}</div><div class="pd-company">${escapeHtml(row.company || '')}</div></td>
+      <td class="pd-num">${pdFmt(row.rate)}</td>
+      <td class="pd-num ${pctClass}">${pdSigned(row.change_pct)}%</td>
+      <td class="pd-num ${tone === 'green' ? 'td-green' : 'td-red'}">${pdSigned(row.w_point)}</td>
+    </tr>
+  `;
 }
-
-async function selectMarketIndex(key) {
-  selectedMarketIndex = key;
-  renderMarketIndexTabs();
-  await renderMarketIndexChart();
+function pdCompareRows(a, b, key, dir) {
+  const av = a?.[key], bv = b?.[key];
+  let result;
+  if (key === 'symbol' || key === 'company') result = String(av || '').localeCompare(String(bv || ''), 'en', { sensitivity: 'base' });
+  else result = Number(av || 0) - Number(bv || 0);
+  return dir === 'asc' ? result : -result;
 }
-
-async function setMarketPeriod(period, btn) {
-  selectedMarketPeriod = period;
-  document.querySelectorAll('.market-period-btn').forEach(b => b.classList.remove('active'));
-  if (btn) btn.classList.add('active');
-  updateMarketSummary();
-  await renderMarketIndexChart();
+function pdSortedRows(rows, tableName) {
+  const state = pdSortState[tableName];
+  return [...(rows || [])].sort((a, b) => pdCompareRows(a, b, state.key, state.dir));
 }
-
-async function renderMarketIndexChart() {
-  const canvas = document.getElementById('market-index-chart');
-  if (!canvas) return;
-  const idx = marketIndicesData.find(i => i.key === selectedMarketIndex) || marketIndicesData[0];
-  if (!idx) return;
-  updateMarketSummary();
-  const r = await fetch(`${API}/market/index-chart/${selectedMarketIndex}?period=${selectedMarketPeriod}`);
-  const payload = await r.json();
-  const rows = payload.data || [];
-  const labels = rows.map(x => x.label);
-  const prices = rows.map(x => x.close);
-  const t = currentThemeColors();
-  const isUp = prices.length > 1 ? prices[prices.length - 1] >= prices[0] : (idx.chg_pct || 0) >= 0;
-  const lineColor = isUp ? getComputedStyle(document.body).getPropertyValue('--green').trim() : '#ff4d6d';
-  const fillColor = isUp ? 'rgba(45,106,79,0.10)' : 'rgba(255,77,109,0.11)';
-  if (marketIndexChart) marketIndexChart.destroy();
-  marketIndexChart = new Chart(canvas.getContext('2d'), {
-    type: 'line',
-    data: { labels, datasets: [{
-      label: idx.name,
-      data: prices,
-      borderColor: lineColor,
-      backgroundColor: fillColor,
-      fill: true,
-      pointRadius: 0,
-      pointHoverRadius: 4,
-      borderWidth: 2,
-      tension: 0.28
-    }]},
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      interaction: {mode: 'index', intersect: false},
-      plugins: {
-        legend: {display: false},
-        tooltip: {
-          backgroundColor: t.tooltipBg, borderColor: t.tooltipBorder, borderWidth: 1,
-          titleColor: t.tooltipTitle, bodyColor: t.tooltipBody,
-          callbacks: {label: ctx => `Price: ₹${fmtNum(ctx.parsed.y)}`}
-        }
-      },
-      scales: {
-        x: {grid: {display:false}, ticks: {color: t.axis, maxTicksLimit: 6, font:{size:10, weight:'800'}}, border: {display:false}},
-        y: {position: 'right', grid: {color: t.grid}, ticks: {color: t.axis, font:{size:10, weight:'800'}, callback: v => fmt(v)}, border: {display:false}}
-      }
-    }
+function updatePullerDraggerSortHeaders() {
+  document.querySelectorAll('.pd-sort-th').forEach(btn => {
+    const table = btn.dataset.table;
+    const key = btn.dataset.key;
+    const mark = btn.querySelector('.pd-sort-mark');
+    const active = pdSortState[table]?.key === key;
+    btn.classList.toggle('active-sort', active);
+    if (mark) mark.textContent = active ? (pdSortState[table].dir === 'asc' ? '↑' : '↓') : '⇅';
   });
+}
+function renderPullerDraggerDonut(pullCount, dragCount) {
+  const total = Math.max(Number(pullCount || 0) + Number(dragCount || 0), 1);
+  const pullPct = Math.max(0, Math.min(100, (Number(pullCount || 0) / total) * 100));
+  const dragPct = 100 - pullPct;
+  const gap = total > 1 ? 1.5 : 0;
+  const pull = document.getElementById('pd-donut-pull');
+  const drag = document.getElementById('pd-donut-drag');
+  if (!pull || !drag) return;
+  pull.style.strokeDasharray = `${Math.max(pullPct - gap, 0)} ${100 - Math.max(pullPct - gap, 0)}`;
+  pull.style.strokeDashoffset = '0';
+  drag.style.strokeDasharray = `${Math.max(dragPct - gap, 0)} ${100 - Math.max(dragPct - gap, 0)}`;
+  drag.style.strokeDashoffset = `-${pullPct}`;
+}
+function renderPullerDraggerTables(data) {
+  const pullers = document.getElementById('pd-pullers-body');
+  const draggers = document.getElementById('pd-draggers-body');
+  if (!pullers || !draggers) return;
+  const pullerRows = pdSortedRows(data.pullers, 'pullers');
+  const draggerRows = pdSortedRows(data.draggers, 'draggers');
+  pullers.innerHTML = pullerRows.length ? pullerRows.map(r => pdRowHtml(r, 'green')).join('') : '<tr class="pd-empty-row"><td colspan="4">No pullers</td></tr>';
+  draggers.innerHTML = draggerRows.length ? draggerRows.map(r => pdRowHtml(r, 'red')).join('') : '<tr class="pd-empty-row"><td colspan="4">No draggers</td></tr>';
+  updatePullerDraggerSortHeaders();
+}
+function renderPullerDragger(data) {
+  pdLatestData = data;
+  const setText = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  setText('pd-index-name', data.name || '—');
+  setText('pd-index-value', pdFmt(data.index?.value));
+  const changeEl = document.getElementById('pd-index-change');
+  if (changeEl) {
+    const chg = Number(data.index?.change || 0);
+    const pct = Number(data.index?.change_pct || 0);
+    changeEl.textContent = `${pdSigned(chg)} (${pdSigned(pct)}%)`;
+    changeEl.className = `${chg >= 0 ? 'td-green' : 'td-red'} pd-small`;
+  }
+  setText('pd-last-updated', data.last_updated || '—');
+  setText('pd-market-status', data.status || 'Market Closed');
+  setText('pd-pull-count', data.summary?.pull_count || 0);
+  setText('pd-drag-count', data.summary?.drag_count || 0);
+  setText('pd-pull-total', pdSigned(data.summary?.pull_total));
+  setText('pd-drag-total', pdSigned(data.summary?.drag_total));
+  setText('pd-pullers-title-count', data.summary?.pull_count || 0);
+  setText('pd-draggers-title-count', data.summary?.drag_count || 0);
+  setText('pd-unchanged-count', data.summary?.unchanged_count || 0);
+  renderPullerDraggerDonut(data.summary?.pull_count, data.summary?.drag_count);
+  renderPullerDraggerTables(data);
+}
+async function loadMarkets(force = false) {
+  const loader = document.getElementById('pd-loading');
+  if (loader) loader.style.display = 'block';
+  try {
+    const r = await fetch(`${API}/market/pullers-draggers?index=${pdCurrentIndex}${force ? '&refresh=1' : ''}`);
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Unable to load data');
+    renderPullerDragger(data);
+    updateLastUpdated();
+  } catch (e) {
+    const pullers = document.getElementById('pd-pullers-body');
+    const draggers = document.getElementById('pd-draggers-body');
+    const msg = escapeHtml(e.message || 'Unable to load market data');
+    if (pullers) pullers.innerHTML = `<tr class="pd-empty-row"><td colspan="4">${msg}</td></tr>`;
+    if (draggers) draggers.innerHTML = `<tr class="pd-empty-row"><td colspan="4">${msg}</td></tr>`;
+  } finally {
+    if (loader) loader.style.display = 'none';
+    setupPullerDraggerAutoRefresh();
+  }
+}
+function selectPullerDraggerIndex(indexKey, btn) {
+  pdCurrentIndex = indexKey;
+  document.querySelectorAll('.pd-tab').forEach(t => t.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  pdSortState.pullers = { key: 'w_point', dir: 'desc' };
+  pdSortState.draggers = { key: 'w_point', dir: 'asc' };
+  loadMarkets(true).catch(console.error);
+}
+function sortPullerDraggerTable(table, key) {
+  if (!pdSortState[table]) return;
+  if (pdSortState[table].key === key) pdSortState[table].dir = pdSortState[table].dir === 'asc' ? 'desc' : 'asc';
+  else pdSortState[table] = { key, dir: key === 'symbol' ? 'asc' : 'desc' };
+  if (pdLatestData) renderPullerDraggerTables(pdLatestData);
+}
+function setupPullerDraggerAutoRefresh() {
+  if (pdAutoRefreshTimer) clearInterval(pdAutoRefreshTimer);
+  const sel = document.getElementById('pd-refresh-seconds');
+  const seconds = Number(sel?.value || 60);
+  pdAutoRefreshTimer = setInterval(() => {
+    if (activePage === 'markets') loadMarkets(true).catch(console.error);
+  }, seconds * 1000);
 }
 
 
