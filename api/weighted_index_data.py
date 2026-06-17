@@ -104,13 +104,6 @@ sensex_data = [
     {"Index": "S&P BSE Sensex", "Rank": 30, "Company Name": "Tech Mahindra Ltd.", "Symbol/Ticker": "TECHM", "Weightage (%)": 0.93}
 ]
 
-# Combine all lists into one unified dataset
+
+# Unified index data available for optional consumers.
 all_indices_data = nifty50_data + banknifty_data + sensex_data
-
-# Create DataFrame
-df = pd.DataFrame(all_indices_data)
-
-# Export to CSV
-csv_filename = "indian_indices_constituents_weightage.csv"
-df.to_csv(csv_filename, index=False)
-print(f"CSV file generated successfully: {csv_filename}")

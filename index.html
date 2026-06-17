@@ -4195,7 +4195,7 @@ async function loadMarkets(force = false) {
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Unable to load data');
     renderPullerDragger(data);
-    updateLastUpdated();
+    setLastUpdated('Markets');
   } catch (e) {
     const pullers = document.getElementById('pd-pullers-body');
     const draggers = document.getElementById('pd-draggers-body');
