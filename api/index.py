@@ -164,6 +164,10 @@ def init_db():
                     )
                 """)
                 cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMPTZ")
+                cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'APPROVED'")
+                cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN NOT NULL DEFAULT TRUE")
+                cur.execute("UPDATE users SET status='APPROVED' WHERE status IS NULL OR TRIM(status)=''")
+                cur.execute("UPDATE users SET is_enabled=TRUE WHERE is_enabled IS NULL")
 
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS holdings (
@@ -296,17 +300,17 @@ def db_get_user(email):
         return None
     with db_connect() as conn:
         with conn.cursor() as cur:
-            cur.execute('SELECT id, email, password, created, last_login FROM users WHERE email=%s', (email,))
+            cur.execute('SELECT id, email, password, created, last_login, status, is_enabled FROM users WHERE email=%s', (email,))
             row = cur.fetchone()
     return _row_to_dict(row) if row else None
 
-def db_create_user(email, password_hash):
+def db_create_user(email, password_hash, status='PENDING', is_enabled=True):
     if not init_db():
         raise RuntimeError(DB_LAST_ERROR or 'Database is not initialized')
     user_id = str(uuid.uuid4())
     with db_connect() as conn:
         with conn.cursor() as cur:
-            cur.execute('INSERT INTO users (id, email, password, created, last_login) VALUES (%s,%s,%s,NOW(),NULL)', (user_id, email, password_hash))
+            cur.execute('INSERT INTO users (id, email, password, created, last_login, status, is_enabled) VALUES (%s,%s,%s,NOW(),NULL,%s,%s)', (user_id, email, password_hash, str(status or 'PENDING').upper(), bool(is_enabled)))
     return {'id': user_id, 'email': email}
 
 
@@ -315,7 +319,7 @@ def db_get_user_by_id(user_id):
         return None
     with db_connect() as conn:
         with conn.cursor() as cur:
-            cur.execute('SELECT id, email, password, created, last_login FROM users WHERE id=%s', (user_id,))
+            cur.execute('SELECT id, email, password, created, last_login, status, is_enabled FROM users WHERE id=%s', (user_id,))
             row = cur.fetchone()
     return _row_to_dict(row) if row else None
 
@@ -1396,15 +1400,15 @@ def signup():
         if db_get_user(email):
             return jsonify({'error': 'Email already registered'}), 409
         user = db_create_user(email, hash_password(password))
-        return jsonify({'message': 'Account created', 'user_id': user['id'], 'email': email, 'storage': 'neon'})
+        return jsonify({'message': 'Account created. Pending admin approval.', 'user_id': user['id'], 'email': email, 'status': 'PENDING', 'storage': 'neon'})
 
     users = load_json(USERS_FILE)
     if email in users:
         return jsonify({'error': 'Email already registered'}), 409
     user_id = str(uuid.uuid4())
-    users[email] = {'id': user_id, 'email': email, 'password': hash_password(password), 'created': str(datetime.now()), 'last_login': None}
+    users[email] = {'id': user_id, 'email': email, 'password': hash_password(password), 'created': str(datetime.now()), 'last_login': None, 'status': 'PENDING', 'is_enabled': True}
     save_json(USERS_FILE, users)
-    return jsonify({'message': 'Account created', 'user_id': user_id, 'email': email, 'storage': 'json-fallback'})
+    return jsonify({'message': 'Account created. Pending admin approval.', 'user_id': user_id, 'email': email, 'status': 'PENDING', 'storage': 'json-fallback'})
 
 @app.route('/api/login', methods=['POST'])
 def login():
@@ -1416,6 +1420,10 @@ def login():
         user = db_get_user(email)
         if not user or user['password'] != hash_password(password):
             return jsonify({'error': 'Invalid credentials'}), 401
+        if not bool(user.get('is_enabled', True)):
+            return jsonify({'error': 'User account is disabled. Contact admin.'}), 403
+        if str(user.get('status') or 'APPROVED').upper() != 'APPROVED':
+            return jsonify({'error': 'Your account is pending admin approval.'}), 403
         last_login = db_update_last_login(user['id'])
         return jsonify({'message': 'Login successful', 'user_id': user['id'], 'email': email, 'last_login': last_login, 'storage': 'neon'})
 
@@ -1423,6 +1431,10 @@ def login():
     user = users.get(email)
     if not user or user['password'] != hash_password(password):
         return jsonify({'error': 'Invalid credentials'}), 401
+    if not bool(user.get('is_enabled', True)):
+        return jsonify({'error': 'User account is disabled. Contact admin.'}), 403
+    if str(user.get('status') or 'APPROVED').upper() != 'APPROVED':
+        return jsonify({'error': 'Your account is pending admin approval.'}), 403
     user['last_login'] = str(datetime.now())
     users[email] = user
     save_json(USERS_FILE, users)
@@ -2841,7 +2853,9 @@ def _user_display(row):
         'id': d.get('id'),
         'username': d.get('email'),
         'password': '••••••••',
-        'user_since': _dt_to_str(d.get('created'))
+        'user_since': _dt_to_str(d.get('created')),
+        'status': str(d.get('status') or 'APPROVED').upper(),
+        'enabled': bool(d.get('is_enabled', True))
     }
 
 def db_admin_list_users(search=''):
@@ -2851,9 +2865,9 @@ def db_admin_list_users(search=''):
     with db_connect() as conn:
         with conn.cursor() as cur:
             if search:
-                cur.execute('SELECT id, email, password, created FROM users WHERE LOWER(email) LIKE %s ORDER BY created DESC, email', (like,))
+                cur.execute('SELECT id, email, password, created, status, is_enabled FROM users WHERE LOWER(email) LIKE %s ORDER BY created DESC, email', (like,))
             else:
-                cur.execute('SELECT id, email, password, created FROM users ORDER BY created DESC, email')
+                cur.execute('SELECT id, email, password, created, status, is_enabled FROM users ORDER BY created DESC, email')
             rows = cur.fetchall() or []
     return [_user_display(r) for r in rows]
 
@@ -2862,7 +2876,7 @@ def db_admin_get_user_by_id(user_id):
         return None
     with db_connect() as conn:
         with conn.cursor() as cur:
-            cur.execute('SELECT id, email, password, created, last_login FROM users WHERE id=%s', (user_id,))
+            cur.execute('SELECT id, email, password, created, last_login, status, is_enabled FROM users WHERE id=%s', (user_id,))
             row = cur.fetchone()
     return _row_to_dict(row) if row else None
 
@@ -2873,18 +2887,18 @@ def db_admin_create_user(username, password):
     if db_configured():
         if db_get_user(username):
             raise ValueError('User already exists')
-        u = db_create_user(username, hash_password(password))
+        u = db_create_user(username, hash_password(password), status='APPROVED', is_enabled=True)
         user = db_get_user(username)
         return _user_display(user)
     users = load_json(USERS_FILE)
     if username in users:
         raise ValueError('User already exists')
     user_id = str(uuid.uuid4())
-    users[username] = {'id': user_id, 'email': username, 'password': hash_password(password), 'created': str(datetime.now())}
+    users[username] = {'id': user_id, 'email': username, 'password': hash_password(password), 'created': str(datetime.now()), 'status': 'APPROVED', 'is_enabled': True}
     save_json(USERS_FILE, users)
-    return {'id': user_id, 'username': username, 'password': '••••••••', 'user_since': users[username]['created']}
+    return {'id': user_id, 'username': username, 'password': '••••••••', 'user_since': users[username]['created'], 'status': users[username].get('status', 'APPROVED'), 'enabled': bool(users[username].get('is_enabled', True))}
 
-def db_admin_update_user(user_id, username=None, password=None):
+def db_admin_update_user(user_id, username=None, password=None, status=None, enabled=None):
     username = str(username or '').lower().strip() if username is not None else None
     if db_configured():
         if not init_db():
@@ -2900,6 +2914,13 @@ def db_admin_update_user(user_id, username=None, password=None):
             updates.append('email=%s'); vals.append(username)
         if password:
             updates.append('password=%s'); vals.append(hash_password(password))
+        if status is not None:
+            status_val = str(status or '').upper().strip()
+            if status_val not in ('PENDING', 'APPROVED'):
+                raise ValueError('Status must be PENDING or APPROVED')
+            updates.append('status=%s'); vals.append(status_val)
+        if enabled is not None:
+            updates.append('is_enabled=%s'); vals.append(bool(enabled))
         if updates:
             vals.append(user_id)
             with db_connect() as conn:
@@ -2924,8 +2945,15 @@ def db_admin_update_user(user_id, username=None, password=None):
         users[found_key] = record
     if password:
         users[found_key]['password'] = hash_password(password)
+    if status is not None:
+        status_val = str(status or '').upper().strip()
+        if status_val not in ('PENDING', 'APPROVED'):
+            raise ValueError('Status must be PENDING or APPROVED')
+        users[found_key]['status'] = status_val
+    if enabled is not None:
+        users[found_key]['is_enabled'] = bool(enabled)
     save_json(USERS_FILE, users)
-    return {'id': user_id, 'username': found_key, 'password': '••••••••', 'user_since': users[found_key].get('created')}
+    return {'id': user_id, 'username': found_key, 'password': '••••••••', 'user_since': users[found_key].get('created'), 'status': users[found_key].get('status', 'APPROVED'), 'enabled': bool(users[found_key].get('is_enabled', True))}
 
 def db_admin_delete_user(user_id):
     if db_configured():
@@ -2981,7 +3009,7 @@ def admin_list_users():
                 username = v.get('email') or _
                 if search and search.lower() not in str(username).lower():
                     continue
-                users.append({'id': v.get('id'), 'username': username, 'password': '••••••••', 'user_since': v.get('created')})
+                users.append({'id': v.get('id'), 'username': username, 'password': '••••••••', 'user_since': v.get('created'), 'status': v.get('status', 'APPROVED'), 'enabled': bool(v.get('is_enabled', True))})
         return jsonify({'ok': True, 'users': users, 'storage': 'neon' if db_configured() else 'json-fallback'})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 500
@@ -3007,7 +3035,7 @@ def admin_update_user(user_id):
         return auth_error
     data = get_request_json()
     try:
-        user = db_admin_update_user(user_id, data.get('username'), data.get('password'))
+        user = db_admin_update_user(user_id, data.get('username'), data.get('password'), data.get('status') if 'status' in data else None, data.get('enabled') if 'enabled' in data else None)
         return jsonify({'ok': True, 'message': 'User updated', 'user': user})
     except ValueError as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
