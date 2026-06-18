@@ -91,7 +91,8 @@ https://your-app.vercel.app/Admin
 Default super user login:
 
 ```text
-
+UID: superuser
+Password: June021999
 ```
 
 The Admin panel includes a **Create Members** tab with:

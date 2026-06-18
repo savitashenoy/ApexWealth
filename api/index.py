@@ -1400,7 +1400,7 @@ def signup():
         if db_get_user(email):
             return jsonify({'error': 'Email already registered'}), 409
         user = db_create_user(email, hash_password(password))
-        return jsonify({'message': 'Account created. Pending admin approval.', 'user_id': user['id'], 'email': email, 'status': 'PENDING', 'storage': 'neon'})
+        return jsonify({'message': 'Your account is currently PENDING admin approval', 'user_id': user['id'], 'email': email, 'status': 'PENDING', 'storage': 'neon'})
 
     users = load_json(USERS_FILE)
     if email in users:
@@ -1408,7 +1408,7 @@ def signup():
     user_id = str(uuid.uuid4())
     users[email] = {'id': user_id, 'email': email, 'password': hash_password(password), 'created': str(datetime.now()), 'last_login': None, 'status': 'PENDING', 'is_enabled': True}
     save_json(USERS_FILE, users)
-    return jsonify({'message': 'Account created. Pending admin approval.', 'user_id': user_id, 'email': email, 'status': 'PENDING', 'storage': 'json-fallback'})
+    return jsonify({'message': 'Your account is currently PENDING admin approval', 'user_id': user_id, 'email': email, 'status': 'PENDING', 'storage': 'json-fallback'})
 
 @app.route('/api/login', methods=['POST'])
 def login():
@@ -1423,7 +1423,7 @@ def login():
         if not bool(user.get('is_enabled', True)):
             return jsonify({'error': 'User account is disabled. Contact admin.'}), 403
         if str(user.get('status') or 'APPROVED').upper() != 'APPROVED':
-            return jsonify({'error': 'Your account is pending admin approval.'}), 403
+            return jsonify({'error': 'Account is pending admin approval'}), 403
         last_login = db_update_last_login(user['id'])
         return jsonify({'message': 'Login successful', 'user_id': user['id'], 'email': email, 'last_login': last_login, 'storage': 'neon'})
 
@@ -1434,7 +1434,7 @@ def login():
     if not bool(user.get('is_enabled', True)):
         return jsonify({'error': 'User account is disabled. Contact admin.'}), 403
     if str(user.get('status') or 'APPROVED').upper() != 'APPROVED':
-        return jsonify({'error': 'Your account is pending admin approval.'}), 403
+        return jsonify({'error': 'Account is pending admin approval'}), 403
     user['last_login'] = str(datetime.now())
     users[email] = user
     save_json(USERS_FILE, users)
@@ -1452,6 +1452,8 @@ def get_profile(user_id):
             'password': '••••••••',
             'created': user.get('created'),
             'last_login': user.get('last_login'),
+            'status': str(user.get('status') or 'APPROVED').upper(),
+            'is_enabled': bool(user.get('is_enabled', True)),
             'storage': 'neon'
         })
     users = load_json(USERS_FILE)
@@ -1464,6 +1466,8 @@ def get_profile(user_id):
         'password': '••••••••',
         'created': user.get('created'),
         'last_login': user.get('last_login'),
+        'status': str(user.get('status') or 'APPROVED').upper(),
+        'is_enabled': bool(user.get('is_enabled', True)),
         'storage': 'json-fallback'
     })
 

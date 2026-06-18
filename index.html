@@ -2209,11 +2209,29 @@ window.onload = async () => {
   // Set today's date on add form
   document.getElementById('add-date').value = new Date().toISOString().split('T')[0];
 
-  // Session restore
+  // Session restore. Validate the account on the server so PENDING / disabled
+  // users cannot enter the app from stale browser sessionStorage.
   const saved = sessionStorage.getItem('apex_user');
   if (saved) {
-    USER = JSON.parse(saved);
-    setTimeout(() => startApp(), 1400);
+    try {
+      USER = JSON.parse(saved);
+      const profile = await fetchJsonSafe(`${API}/profile/${USER.user_id}`, {cache:'no-store'});
+      if (profile && profile.is_enabled !== false && String(profile.status || 'APPROVED').toUpperCase() === 'APPROVED') {
+        setTimeout(() => startApp(), 1400);
+      } else {
+        sessionStorage.removeItem('apex_user');
+        USER = null;
+        setTimeout(() => {
+          showAuth();
+          document.getElementById('login-error').textContent =
+            profile && profile.is_enabled === false ? 'User account is disabled. Contact admin.' : 'Account is pending admin approval';
+        }, 1400);
+      }
+    } catch(e) {
+      sessionStorage.removeItem('apex_user');
+      USER = null;
+      setTimeout(() => showAuth(), 1400);
+    }
   } else {
     setTimeout(() => showAuth(), 1400);
   }
@@ -2274,14 +2292,26 @@ async function doSignup(e) {
   const password = document.getElementById('signup-password').value;
   const confirm = document.getElementById('signup-confirm').value;
   document.getElementById('signup-error').textContent = '';
+  document.getElementById('signup-error').style.color = '';
   if (password !== confirm) { document.getElementById('signup-error').textContent = 'Passwords do not match'; return; }
   try {
     const d = await fetchJsonSafe(`${API}/signup`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
-    USER = {user_id: d.user_id, email: d.email};
-    sessionStorage.setItem('apex_user', JSON.stringify(USER));
-    startApp();
+    // Do not auto-login newly created accounts. They remain PENDING until Admin approval.
+    sessionStorage.removeItem('apex_user');
+    USER = null;
+    const msg = d.message || 'Your account is currently PENDING admin approval';
+    const signupMsg = document.getElementById('signup-error');
+    signupMsg.textContent = msg;
+    signupMsg.style.color = '#2E6F40';
+    document.getElementById('signup-form').reset();
+    setTimeout(() => {
+      switchAuthTab('login');
+      document.getElementById('login-error').textContent = 'Account is pending admin approval';
+    }, 1800);
   } catch(err) {
-    document.getElementById('signup-error').textContent = err.message;
+    const signupMsg = document.getElementById('signup-error');
+    signupMsg.style.color = '';
+    signupMsg.textContent = err.message;
   }
 }
 
