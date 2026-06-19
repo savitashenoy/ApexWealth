@@ -3399,6 +3399,158 @@ def screener_check_priceaction_symbol(symbol, config):
         'volume': volume, 'vol10day_high': bool(volume > prev_10_vol_max) if prev_10_vol_max else False,
     }
 
+
+# ─── Big Order Scanner ───────────────────────────────────────────────────────
+BIG_ORDER_TIMEFRAMES = {
+    "15min": {"interval": "15m", "period": "60d"},
+    "30min": {"interval": "30m", "period": "60d"},
+    "60min": {"interval": "60m", "period": "180d"},
+    "1day": {"interval": "1d", "period": "1y"},
+}
+BIG_ORDER_PCT_MEDIUM = 90.0
+BIG_ORDER_PCT_LARGE = 97.0
+BIG_ORDER_MIN_HISTORY_BARS = 50
+BIG_ORDER_LOOKBACK_BARS_TO_CHECK = 3
+BIG_ORDER_REL_VOLUME_WINDOW = 20
+BIG_ORDER_MIN_AVG_DOLLAR_VOLUME_20 = 5_00_00_000
+BIG_ORDER_REL_VOLUME_SCORE_CAP = 5.0
+BIG_ORDER_LIQUIDITY_SCORE_CAP = 25_00_00_000
+
+def _big_order_previous_average(series, window):
+    return series.shift(1).rolling(window=window, min_periods=window).mean()
+
+def _big_order_safe_ratio(numerator, denominator):
+    denominator = denominator.replace(0, np.nan)
+    return (numerator / denominator).replace([np.inf, -np.inf], np.nan)
+
+def _big_order_normalize_100(value, cap):
+    if pd.isna(value) or cap <= 0:
+        return 0.0
+    return max(0.0, min((float(value) / cap) * 100.0, 100.0))
+
+def _big_order_composite_score(percentile, rel_volume_20, avg_dollar_volume_20, bars_ago):
+    percentile_score = max(0.0, min(float(percentile), 100.0))
+    rel_volume_score = _big_order_normalize_100(rel_volume_20, BIG_ORDER_REL_VOLUME_SCORE_CAP)
+    liquidity_score = _big_order_normalize_100(avg_dollar_volume_20, BIG_ORDER_LIQUIDITY_SCORE_CAP)
+    max_age = max(BIG_ORDER_LOOKBACK_BARS_TO_CHECK - 1, 1)
+    recency_score = max(0.0, 100.0 * (1.0 - (bars_ago / max_age)))
+    return round((0.40 * percentile_score) + (0.30 * rel_volume_score) + (0.20 * liquidity_score) + (0.10 * recency_score), 2)
+
+def _big_order_size_label(percentile):
+    if percentile >= BIG_ORDER_PCT_LARGE:
+        return 'Large'
+    if percentile >= BIG_ORDER_PCT_MEDIUM:
+        return 'Medium'
+    return 'Small'
+
+def _big_order_time_since(bar_time):
+    try:
+        now = pd.Timestamp.now(tz=bar_time.tzinfo) if getattr(bar_time, 'tzinfo', None) else pd.Timestamp.now()
+        delta = now - bar_time
+        total_minutes = int(delta.total_seconds() // 60)
+        if total_minutes <= 0:
+            return 'Now'
+        days, rem = divmod(total_minutes, 1440)
+        hours, minutes = divmod(rem, 60)
+        if days > 0:
+            return f'{days}D'
+        if hours > 0:
+            return f'{hours}h{minutes}m'
+        return f'{minutes}m' if minutes > 0 else 'Now'
+    except Exception:
+        return ''
+
+def screener_check_bigorder_symbol(symbol, config=None):
+    """Big Order Scanner adapted from the attached Flask app, using ScannerData.xlsx symbols."""
+    config = config or {}
+    selected_tfs = config.get('timeframes') or list(BIG_ORDER_TIMEFRAMES.keys())
+    
+    try:
+        min_score = float(config.get('min_score')) if config.get('min_score') not in ('', None) else None
+    except Exception:
+        min_score = None
+    size_filter = str(config.get('size', 'All') or 'All')
+    side_filter = str(config.get('side', 'All') or 'All')
+    symbol = screener_normalize_symbol(symbol)
+    rows = []
+    for tf_label, params in BIG_ORDER_TIMEFRAMES.items():
+        if tf_label not in selected_tfs:
+            continue
+        df = screener_fetch_history(symbol, interval=params['interval'], period=params['period'], auto_adjust=False)
+        if df is None or df.empty:
+            continue
+        # screener_fetch_history returns lowercase OHLCV columns.
+        df = df.rename(columns={'open':'Open','high':'High','low':'Low','close':'Close','volume':'Volume'}).copy()
+        df = df.dropna(subset=['Close', 'Volume'])
+        df = df[df['Volume'] > 0]
+        if len(df) > 1:
+            df = df.iloc[:-1].copy()
+        min_required = max(BIG_ORDER_MIN_HISTORY_BARS, BIG_ORDER_REL_VOLUME_WINDOW + BIG_ORDER_LOOKBACK_BARS_TO_CHECK + 1)
+        if len(df) < min_required:
+            continue
+        raw_volume = df['Volume']
+        dollar_metric = df['Volume'] * df['Close']
+        vol_metric = dollar_metric
+        direction = np.sign(df['Close'].diff()).fillna(0)
+        pct_rank = vol_metric.rank(pct=True) * 100.0
+        avg_volume_20 = _big_order_previous_average(raw_volume, BIG_ORDER_REL_VOLUME_WINDOW)
+        rel_volume_20 = _big_order_safe_ratio(raw_volume, avg_volume_20)
+        avg_dollar_volume_20 = _big_order_previous_average(dollar_metric, BIG_ORDER_REL_VOLUME_WINDOW)
+        rel_dollar_volume_20 = _big_order_safe_ratio(dollar_metric, avg_dollar_volume_20)
+        n = len(df)
+        check_n = min(BIG_ORDER_LOOKBACK_BARS_TO_CHECK, n)
+        for i in range(n - check_n, n):
+            pct = float(pct_rank.iloc[i])
+            size_label = _big_order_size_label(pct)
+            if size_label == 'Small':
+                continue
+            avg_vol = float(avg_volume_20.iloc[i]) if pd.notna(avg_volume_20.iloc[i]) else np.nan
+            rel_vol = float(rel_volume_20.iloc[i]) if pd.notna(rel_volume_20.iloc[i]) else np.nan
+            avg_dollar_vol = float(avg_dollar_volume_20.iloc[i]) if pd.notna(avg_dollar_volume_20.iloc[i]) else np.nan
+            rel_dollar_vol = float(rel_dollar_volume_20.iloc[i]) if pd.notna(rel_dollar_volume_20.iloc[i]) else np.nan
+            if pd.isna(avg_dollar_vol) or avg_dollar_vol < BIG_ORDER_MIN_AVG_DOLLAR_VOLUME_20:
+                continue
+            bars_ago = n - 1 - i
+            score = _big_order_composite_score(pct, rel_vol, avg_dollar_vol, bars_ago)
+            side = {1: 'Long', -1: 'Short', 0: 'Flat'}.get(int(direction.iloc[i]), 'Flat')
+            if size_filter != 'All' and size_filter != size_label:
+                continue
+            if side_filter != 'All' and side_filter != side:
+                continue
+            if min_score is not None and score < min_score:
+                continue
+            price = float(df['Close'].iloc[i])
+            raw_vol = float(df['Volume'].iloc[i])
+            ticker_display = screener_clean_display_symbol(symbol)
+            rows.append({
+                'symbol': ticker_display,
+                'Ticker': ticker_display,
+                'timeframe': tf_label,
+                'Timeframe': tf_label,
+                'side': side,
+                'Side': side,
+                'size': size_label,
+                'Size': size_label,
+                'composite_score': round(score, 2),
+                'CompositeScore': round(score, 2),
+                'percentile': round(pct, 2),
+                'Percentile': round(pct, 2),
+                'rel_volume_20': round(rel_vol, 2) if pd.notna(rel_vol) else '',
+                'RelVolume20': round(rel_vol, 2) if pd.notna(rel_vol) else '',
+                'price': round(price, 2),
+                'Price': round(price, 2),
+                'volume': int(raw_vol),
+                'Volume': int(raw_vol),
+                'dollar_volume': round(raw_vol * price, 2),
+                'avg_dollar_volume_20': round(avg_dollar_vol, 2) if pd.notna(avg_dollar_vol) else '',
+                'rel_dollar_volume_20': round(rel_dollar_vol, 2) if pd.notna(rel_dollar_vol) else '',
+                'bar_time': str(df.index[i]),
+                'time_since': _big_order_time_since(df.index[i]),
+                'TimeSince': _big_order_time_since(df.index[i]),
+            })
+    rows.sort(key=lambda r: (float(r.get('CompositeScore') or 0), float(r.get('Percentile') or 0)), reverse=True)
+    return rows
+
 def screener_scan_symbol(scanner, symbol, config):
     if scanner == 'ema':
         matched, details = screener_check_ema_symbol(symbol, config)
@@ -3411,6 +3563,8 @@ def screener_scan_symbol(scanner, symbol, config):
     if scanner == 'priceaction':
         matched, details = screener_check_priceaction_symbol(symbol, config)
         return [details] if matched and isinstance(details, dict) else []
+    if scanner == 'bigorder':
+        return screener_check_bigorder_symbol(symbol, config)
     raise ValueError('Unknown scanner')
 
 def screener_iter_scan_events(sheet_name, scanner, config, max_symbols=None):
@@ -3447,8 +3601,8 @@ def api_screener_symbols():
 
 @app.route('/api/screener/scan_stream/<scanner>', methods=['POST'])
 def api_screener_scan_stream(scanner):
-    if scanner not in {'ema', 'volume', 'orb', 'priceaction'}:
-        return jsonify({'error': "scanner must be one of: ema, volume, orb, priceaction"}), 400
+    if scanner not in {'ema', 'volume', 'orb', 'priceaction', 'bigorder'}:
+        return jsonify({'error': "scanner must be one of: ema, volume, orb, priceaction, bigorder"}), 400
     payload = get_request_json()
     sheet = payload.get('sheet')
     config = payload.get('config', {})
