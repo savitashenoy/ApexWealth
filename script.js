@@ -2770,3 +2770,5 @@ function fmtNum(n) {
 document.querySelectorAll('.modal-overlay').forEach(m => m.addEventListener('click', function(e) {
   if (e.target === this) { this.classList.remove('open'); }
 }));
+
+// API Connect tab supported by generic tab switcher
