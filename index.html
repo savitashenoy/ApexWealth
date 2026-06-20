@@ -1317,7 +1317,6 @@ body.light .pd-shell{background:linear-gradient(180deg,#f5f2eb,#edeae2)}body.lig
         <button class="tab-btn active" onclick="switchPortTab('holdings')">Holdings</button>
         <button class="tab-btn" onclick="switchPortTab('alerts')">Alerts</button>
         <button class="tab-btn" onclick="switchPortTab('performance')">Performance Report</button>
-        <button class="tab-btn" onclick="switchPortTab('api-connect')">API Connect</button>
       </div>
 
       <!-- HOLDINGS TAB -->
@@ -1353,6 +1352,20 @@ body.light .pd-shell{background:linear-gradient(180deg,#f5f2eb,#edeae2)}body.lig
             </div>
           </div>
           <div class="auth-error" id="add-error" style="margin-top:8px"></div>
+          <div class="zerodha-panel" id="zerodha-panel">
+            <div class="zerodha-head">
+              <div><i class="fa fa-link"></i> Zerodha Execution Layer</div>
+              <span class="zerodha-status" id="zerodha-status-chip">Checking…</span>
+            </div>
+            <div class="zerodha-sub">Apex holdings/trades are updated only after Kite returns a confirmed COMPLETE order. Save your Kite API Key/Secret in Settings → API Settings before connecting.</div>
+            <div class="zerodha-actions">
+              <button class="btn btn-outline" onclick="openZerodhaLogin()"><i class="fa fa-arrow-up-right-from-square"></i> Connect Zerodha</button>
+              <input class="form-input zerodha-token-input" id="zerodha-request-token" placeholder="Paste request_token after Kite login"/>
+              <button class="btn btn-primary" onclick="saveZerodhaSession()"><i class="fa fa-key"></i> Save Token</button>
+              <button class="btn btn-outline" onclick="syncZerodhaHoldings()"><i class="fa fa-rotate"></i> Sync Holdings</button>
+              <button class="btn btn-outline" onclick="disconnectZerodha()"><i class="fa fa-unlink"></i> Disconnect</button>
+            </div>
+            <div class="zerodha-msg" id="zerodha-msg"></div>
           </div>
         </div>
 
@@ -1380,28 +1393,7 @@ body.light .pd-shell{background:linear-gradient(180deg,#f5f2eb,#edeae2)}body.lig
       </div>
 
 
-      <!-- API CONNECT TAB -->
-      <div class="tab-content" id="tab-api-connect">
-        <div class="chart-card" style="padding:16px">
-          <div class="chart-title">API Connect</div>
-          <div class="zerodha-panel" id="zerodha-panel">
-            <div class="zerodha-head">
-              <div><i class="fa fa-link"></i> Zerodha Execution Layer</div>
-              <span class="zerodha-status" id="zerodha-status-chip">Checking…</span>
-            </div>
-            <div class="zerodha-sub">Apex holdings/trades are updated only after Kite returns a confirmed COMPLETE order. Save your Kite API Key/Secret in Settings → API Settings before connecting.</div>
-            <div class="zerodha-actions">
-              <button class="btn btn-outline" onclick="openZerodhaLogin()"><i class="fa fa-arrow-up-right-from-square"></i> Connect Zerodha</button>
-              <input class="form-input zerodha-token-input" id="zerodha-request-token" placeholder="Paste request_token after Kite login"/>
-              <button class="btn btn-primary" onclick="saveZerodhaSession()"><i class="fa fa-key"></i> Save Token</button>
-              <button class="btn btn-outline" onclick="syncZerodhaHoldings()"><i class="fa fa-rotate"></i> Sync Holdings</button>
-              <button class="btn btn-outline" onclick="disconnectZerodha()"><i class="fa fa-unlink"></i> Disconnect</button>
-            </div>
-            <div class="zerodha-msg" id="zerodha-msg"></div>
-          
-        </div>
-      </div>
-<!-- ALERTS TAB -->
+      <!-- ALERTS TAB -->
       <div class="tab-content" id="tab-alerts">
         <div class="tbl-section-title"><i class="fa fa-bell"></i> Portfolio Alerts</div>
         <div class="table-wrap">
