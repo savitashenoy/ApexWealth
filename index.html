@@ -2599,8 +2599,10 @@ async function loadSettings() {
   document.getElementById('settings-username').textContent = USER.email || '—';
   document.getElementById('settings-password').textContent = '••••••••';
   document.getElementById('settings-last-login').textContent = 'Loading…';
+  setSettingsApiMessage('');
+  setSettingsZerodhaLoading();
   try {
-    const p = await fetchJsonSafe(`${API}/profile/${USER.user_id}`, {cache:'no-store'});
+    const p = await fetchJsonSafe(`${API}/profile/${encodeURIComponent(USER.user_id)}`, {cache:'no-store'});
     document.getElementById('settings-username').textContent = p.email || USER.email || '—';
     document.getElementById('settings-password').textContent = p.password || '••••••••';
     document.getElementById('settings-last-login').textContent = formatDateTimeDisplay(p.last_login);
@@ -2608,6 +2610,8 @@ async function loadSettings() {
   } catch(err) {
     document.getElementById('settings-last-login').textContent = '—';
     if (msg) { msg.textContent = err.message || 'Unable to load profile'; msg.className = 'settings-msg err'; }
+  } finally {
+    await loadZerodhaApiSettings();
   }
 }
 async function updateSettingsPassword() {
@@ -2618,13 +2622,105 @@ async function updateSettingsPassword() {
   if (!newPwd || newPwd.length < 4) { if (msg) { msg.textContent = 'Enter a password with at least 4 characters.'; msg.className = 'settings-msg err'; } return; }
   if (newPwd !== confirm) { if (msg) { msg.textContent = 'Passwords do not match.'; msg.className = 'settings-msg err'; } return; }
   try {
-    await fetchJsonSafe(`${API}/profile/${USER.user_id}/password`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({password:newPwd})});
+    await fetchJsonSafe(`${API}/profile/${encodeURIComponent(USER.user_id)}/password`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({password:newPwd})});
     document.getElementById('settings-new-password').value = '';
     document.getElementById('settings-confirm-password').value = '';
     if (msg) { msg.textContent = 'Password updated successfully.'; msg.className = 'settings-msg ok'; }
     setLastUpdated('Password updated');
   } catch(err) {
     if (msg) { msg.textContent = err.message || 'Password update failed'; msg.className = 'settings-msg err'; }
+  }
+}
+
+function setSettingsApiMessage(message, ok=false) {
+  const el = document.getElementById('settings-api-msg');
+  if (!el) return;
+  el.textContent = message || '';
+  el.className = `settings-msg ${message ? (ok ? 'ok' : 'err') : ''}`;
+}
+function setSettingsZerodhaLoading() {
+  const status = document.getElementById('settings-zerodha-status');
+  const key = document.getElementById('settings-zerodha-key');
+  const secret = document.getElementById('settings-zerodha-secret-mask');
+  if (status) status.textContent = 'Loading…';
+  if (key) key.textContent = '—';
+  if (secret) secret.textContent = '—';
+}
+function renderSettingsZerodha(data) {
+  const status = document.getElementById('settings-zerodha-status');
+  const key = document.getElementById('settings-zerodha-key');
+  const secret = document.getElementById('settings-zerodha-secret-mask');
+  const keyInput = document.getElementById('settings-kite-api-key');
+  const secretInput = document.getElementById('settings-kite-api-secret');
+  if (status) {
+    if (data?.configured) {
+      status.textContent = data.user_saved ? 'Saved for this user' : 'Using server fallback';
+      status.className = 'profile-value green';
+    } else {
+      status.textContent = 'Not configured';
+      status.className = 'profile-value red';
+    }
+  }
+  if (key) key.textContent = data?.api_key || '—';
+  if (secret) secret.textContent = data?.api_secret_masked || '—';
+  if (keyInput && data?.user_saved) keyInput.value = data.api_key || '';
+  if (secretInput) secretInput.value = '';
+}
+async function loadZerodhaApiSettings() {
+  if (!USER) return;
+  setSettingsZerodhaLoading();
+  try {
+    const data = await fetchJsonSafe(`${API}/zerodha/credentials/${encodeURIComponent(USER.user_id)}`, {cache:'no-store'});
+    renderSettingsZerodha(data);
+    await loadZerodhaStatus();
+  } catch(err) {
+    const status = document.getElementById('settings-zerodha-status');
+    if (status) { status.textContent = 'Unable to load'; status.className = 'profile-value red'; }
+    setSettingsApiMessage(err.message || 'Unable to load Zerodha API settings');
+  }
+}
+async function saveZerodhaApiSettings() {
+  if (!USER) return alert('Login required');
+  const btn = document.querySelector('button[onclick="saveZerodhaApiSettings()"]');
+  const apiKey = document.getElementById('settings-kite-api-key')?.value?.trim() || '';
+  const apiSecret = document.getElementById('settings-kite-api-secret')?.value?.trim() || '';
+  setSettingsApiMessage('');
+  if (!apiKey || !apiSecret) { setSettingsApiMessage('Enter both Zerodha API Key and API Secret.'); return; }
+  const old = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Saving…'; }
+  try {
+    const data = await fetchJsonSafe(`${API}/zerodha/credentials/${encodeURIComponent(USER.user_id)}`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      cache:'no-store',
+      body: JSON.stringify({api_key: apiKey, api_secret: apiSecret})
+    });
+    setSettingsApiMessage(data.message || 'Zerodha API settings saved.', true);
+    renderSettingsZerodha({configured:true, user_saved:true, api_key:data.api_key || apiKey, api_secret_masked:data.api_secret_masked || '••••'});
+    await loadZerodhaStatus();
+  } catch(err) {
+    setSettingsApiMessage(err.message || 'Could not save Zerodha API settings');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = old; }
+  }
+}
+async function clearZerodhaApiSettings() {
+  if (!USER) return alert('Login required');
+  if (!confirm('Remove Zerodha API settings for this user? Existing Zerodha session will also be disconnected.')) return;
+  const btn = document.querySelector('button[onclick="clearZerodhaApiSettings()"]');
+  const old = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Removing…'; }
+  try {
+    await fetchJsonSafe(`${API}/zerodha/credentials/${encodeURIComponent(USER.user_id)}/delete`, {method:'POST', cache:'no-store'});
+    document.getElementById('settings-kite-api-key').value = '';
+    document.getElementById('settings-kite-api-secret').value = '';
+    renderSettingsZerodha({configured:false, user_saved:false});
+    setSettingsApiMessage('Zerodha API settings removed.', true);
+    await loadZerodhaStatus();
+  } catch(err) {
+    setSettingsApiMessage(err.message || 'Could not remove Zerodha API settings');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = old; }
   }
 }
 
