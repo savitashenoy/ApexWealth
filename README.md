@@ -122,3 +122,9 @@ Available APIs:
 - `POST /api/zerodha/order/<user_id>`
 - `POST /api/zerodha/sync-holdings/<user_id>`
 - `POST /api/zerodha/disconnect/<user_id>`
+
+## Per-user Zerodha API settings
+
+Each ApexWealth user can save their own Zerodha Kite Connect API Key and API Secret under **Settings → API Settings**. The values are stored per `user_id` in Neon table `zerodha_credentials` and are used by the Zerodha execution/sync routes for that user. Server-level `KITE_API_KEY` / `KITE_API_SECRET` environment variables remain optional fallback values only.
+
+When credentials are saved or removed, any existing Zerodha access token for that user is cleared so the user reconnects Kite with the matching API key.

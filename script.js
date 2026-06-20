@@ -546,6 +546,7 @@ async function loadSettings() {
     document.getElementById('settings-username').textContent = p.email || USER.email || '—';
     document.getElementById('settings-password').textContent = p.password || '••••••••';
     document.getElementById('settings-last-login').textContent = formatDateTimeDisplay(p.last_login);
+    await loadZerodhaApiSettings();
     setLastUpdated('Settings');
   } catch(err) {
     document.getElementById('settings-last-login').textContent = '—';
@@ -567,6 +568,71 @@ async function updateSettingsPassword() {
     setLastUpdated('Password updated');
   } catch(err) {
     if (msg) { msg.textContent = err.message || 'Password update failed'; msg.className = 'settings-msg err'; }
+  }
+}
+
+
+async function loadZerodhaApiSettings() {
+  if (!USER) return;
+  const msg = document.getElementById('settings-api-msg');
+  if (msg) { msg.textContent = ''; msg.className = 'settings-msg'; }
+  try {
+    const data = await fetchJsonSafe(`${API}/zerodha/credentials/${encodeURIComponent(USER.user_id)}`, {cache:'no-store'});
+    const statusEl = document.getElementById('settings-zerodha-status');
+    const keyEl = document.getElementById('settings-zerodha-key');
+    const secretEl = document.getElementById('settings-zerodha-secret-mask');
+    if (statusEl) statusEl.textContent = data.configured ? (data.user_saved ? 'Saved for this user' : 'Using server fallback') : 'Not configured';
+    if (keyEl) keyEl.textContent = data.api_key || '—';
+    if (secretEl) secretEl.textContent = data.api_secret_masked || '—';
+    const keyInput = document.getElementById('settings-kite-api-key');
+    if (keyInput && data.user_saved && data.api_key) keyInput.value = data.api_key;
+  } catch (err) {
+    if (msg) { msg.textContent = err.message || 'Unable to load API settings'; msg.className = 'settings-msg err'; }
+  }
+}
+
+async function saveZerodhaApiSettings() {
+  const msg = document.getElementById('settings-api-msg');
+  const apiKey = document.getElementById('settings-kite-api-key')?.value?.trim();
+  const apiSecret = document.getElementById('settings-kite-api-secret')?.value?.trim();
+  if (msg) { msg.textContent = ''; msg.className = 'settings-msg'; }
+  if (!USER) return;
+  if (!apiKey || !apiSecret) {
+    if (msg) { msg.textContent = 'Enter both Zerodha API Key and API Secret.'; msg.className = 'settings-msg err'; }
+    return;
+  }
+  try {
+    const data = await fetchJsonSafe(`${API}/zerodha/credentials/${encodeURIComponent(USER.user_id)}`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, cache:'no-store',
+      body: JSON.stringify({api_key: apiKey, api_secret: apiSecret})
+    });
+    document.getElementById('settings-kite-api-secret').value = '';
+    if (msg) { msg.textContent = data.message || 'Zerodha API settings saved.'; msg.className = 'settings-msg ok'; }
+    await loadZerodhaApiSettings();
+    if (typeof refreshZerodhaStatus === 'function') refreshZerodhaStatus();
+    setLastUpdated('API settings saved');
+  } catch (err) {
+    if (msg) { msg.textContent = err.message || 'Could not save API settings'; msg.className = 'settings-msg err'; }
+  }
+}
+
+async function clearZerodhaApiSettings() {
+  if (!USER) return;
+  if (!confirm('Remove saved Zerodha API settings for this user? Existing Zerodha connection token will also be removed.')) return;
+  const msg = document.getElementById('settings-api-msg');
+  if (msg) { msg.textContent = ''; msg.className = 'settings-msg'; }
+  try {
+    await fetchJsonSafe(`${API}/zerodha/credentials/${encodeURIComponent(USER.user_id)}/delete`, {method:'POST', cache:'no-store'});
+    const keyInput = document.getElementById('settings-kite-api-key');
+    const secretInput = document.getElementById('settings-kite-api-secret');
+    if (keyInput) keyInput.value = '';
+    if (secretInput) secretInput.value = '';
+    if (msg) { msg.textContent = 'Zerodha API settings removed.'; msg.className = 'settings-msg ok'; }
+    await loadZerodhaApiSettings();
+    if (typeof refreshZerodhaStatus === 'function') refreshZerodhaStatus();
+    setLastUpdated('API settings removed');
+  } catch (err) {
+    if (msg) { msg.textContent = err.message || 'Could not remove API settings'; msg.className = 'settings-msg err'; }
   }
 }
 

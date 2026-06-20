@@ -84,14 +84,28 @@ WATCHLISTS_FILE = os.path.join(DATA_DIR, 'watchlists.json')
 TRADES_FILE = os.path.join(DATA_DIR, 'trades.json')
 ALERTS_FILE = os.path.join(DATA_DIR, 'portfolio_alerts.json')
 ZERODHA_SESSIONS_FILE = os.path.join(DATA_DIR, 'zerodha_sessions.json')
+ZERODHA_CREDENTIALS_FILE = os.path.join(DATA_DIR, 'zerodha_credentials.json')
 
-# Zerodha Kite Connect credentials are configured in Vercel environment variables.
-# The API secret never goes to the browser; the browser only receives login URL/status.
+# Optional server-level Zerodha fallback credentials. Each Apex user can also save
+# their own Kite API key/secret from Settings -> API Settings. The API secret is
+# never sent back to the browser; only a masked/saved status is returned.
 ZERODHA_API_KEY = os.environ.get('KITE_API_KEY') or os.environ.get('ZERODHA_API_KEY') or ''
 ZERODHA_API_SECRET = os.environ.get('KITE_API_SECRET') or os.environ.get('ZERODHA_API_SECRET') or ''
 
-def zerodha_configured():
+def zerodha_configured(user_id=None):
+    if user_id:
+        creds = db_get_zerodha_credentials(user_id)
+        if creds and creds.get('api_key') and creds.get('api_secret'):
+            return True
     return bool(ZERODHA_API_KEY and ZERODHA_API_SECRET)
+
+def _mask_secret(value, visible=4):
+    value = str(value or '')
+    if not value:
+        return ''
+    if len(value) <= visible:
+        return '•' * len(value)
+    return ('•' * max(4, len(value) - visible)) + value[-visible:]
 
 
 # ─── PERSISTENT STORAGE: Neon PostgreSQL on Vercel ───────────────────────────
@@ -313,6 +327,17 @@ def init_db():
                     )
                 """)
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_zerodha_sessions_user ON zerodha_sessions(user_id)")
+
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS zerodha_credentials (
+                        user_id TEXT PRIMARY KEY,
+                        api_key TEXT NOT NULL,
+                        api_secret TEXT NOT NULL,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_zerodha_credentials_user ON zerodha_credentials(user_id)")
 
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS zerodha_order_audit (
@@ -581,6 +606,65 @@ def db_delete_trade(user_id, trade_id):
         with conn.cursor() as cur:
             cur.execute('DELETE FROM trades WHERE user_id=%s AND id=%s', (user_id, trade_id))
             return cur.rowcount
+
+
+def db_get_zerodha_credentials(user_id):
+    """Return user-level Zerodha Kite credentials, or env fallback if no user row exists."""
+    if db_configured() and init_db():
+        with db_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute('SELECT user_id, api_key, api_secret, created_at, updated_at FROM zerodha_credentials WHERE user_id=%s', (user_id,))
+                row = cur.fetchone()
+        if row:
+            return _row_to_dict(row)
+    else:
+        blob = load_json(ZERODHA_CREDENTIALS_FILE)
+        if user_id in blob:
+            return blob.get(user_id)
+    if ZERODHA_API_KEY and ZERODHA_API_SECRET:
+        return {'user_id': user_id, 'api_key': ZERODHA_API_KEY, 'api_secret': ZERODHA_API_SECRET, 'source': 'env'}
+    return None
+
+
+def db_save_zerodha_credentials(user_id, api_key, api_secret):
+    api_key = str(api_key or '').strip()
+    api_secret = str(api_secret or '').strip()
+    if not api_key or not api_secret:
+        raise ValueError('Both Zerodha API Key and API Secret are required.')
+    if db_configured() and init_db():
+        with db_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO zerodha_credentials (user_id, api_key, api_secret, updated_at)
+                    VALUES (%s,%s,%s,NOW())
+                    ON CONFLICT (user_id) DO UPDATE SET
+                      api_key=EXCLUDED.api_key,
+                      api_secret=EXCLUDED.api_secret,
+                      updated_at=NOW()
+                """, (user_id, api_key, api_secret))
+        return True
+    blob = load_json(ZERODHA_CREDENTIALS_FILE)
+    blob[user_id] = {'user_id': user_id, 'api_key': api_key, 'api_secret': api_secret, 'updated_at': datetime.utcnow().isoformat()}
+    save_json(ZERODHA_CREDENTIALS_FILE, blob)
+    return True
+
+
+def db_delete_zerodha_credentials(user_id):
+    if db_configured() and init_db():
+        with db_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute('DELETE FROM zerodha_credentials WHERE user_id=%s', (user_id,))
+                removed = cur.rowcount
+                cur.execute('DELETE FROM zerodha_sessions WHERE user_id=%s', (user_id,))
+                return removed
+    blob = load_json(ZERODHA_CREDENTIALS_FILE)
+    existed = 1 if user_id in blob else 0
+    blob.pop(user_id, None)
+    save_json(ZERODHA_CREDENTIALS_FILE, blob)
+    sess = load_json(ZERODHA_SESSIONS_FILE)
+    sess.pop(user_id, None)
+    save_json(ZERODHA_SESSIONS_FILE, sess)
+    return existed
 
 
 def db_get_zerodha_session(user_id):
@@ -1794,10 +1878,13 @@ def sell_holding(user_id, holding_id):
 
 # ─── ZERODHA EXECUTION AND SYNC LAYER ────────────────────────────────────────
 
-def _kite_credentials_or_400():
-    if not zerodha_configured():
-        return None, ({'error': 'Zerodha is not configured. Set KITE_API_KEY and KITE_API_SECRET in Vercel environment variables.'}, 400)
-    return {'api_key': ZERODHA_API_KEY, 'api_secret': ZERODHA_API_SECRET}, None
+def _kite_credentials_or_400(user_id=None):
+    creds = db_get_zerodha_credentials(user_id) if user_id else None
+    if not creds and ZERODHA_API_KEY and ZERODHA_API_SECRET:
+        creds = {'api_key': ZERODHA_API_KEY, 'api_secret': ZERODHA_API_SECRET, 'source': 'env'}
+    if not creds or not creds.get('api_key') or not creds.get('api_secret'):
+        return None, ({'error': 'Zerodha API credentials are not configured. Open Settings → API Settings and save your Kite API Key and API Secret.'}, 400)
+    return {'api_key': creds.get('api_key'), 'api_secret': creds.get('api_secret'), 'source': creds.get('source', 'user')}, None
 
 
 def _zerodha_safe_session(user_id):
@@ -1881,14 +1968,52 @@ def _apply_confirmed_sell(user_id, holding_id, sell_price, sell_qty):
 
 @app.route('/api/zerodha/config', methods=['GET'])
 def zerodha_config():
-    return jsonify({'configured': zerodha_configured(), 'api_key': ZERODHA_API_KEY if ZERODHA_API_KEY else None})
+    return jsonify({'server_configured': bool(ZERODHA_API_KEY and ZERODHA_API_SECRET), 'api_key': ZERODHA_API_KEY if ZERODHA_API_KEY else None})
+
+
+@app.route('/api/zerodha/credentials/<user_id>', methods=['GET'])
+def zerodha_credentials_get(user_id):
+    creds = db_get_zerodha_credentials(user_id)
+    user_saved = bool(creds and creds.get('source') != 'env')
+    return jsonify({
+        'configured': bool(creds and creds.get('api_key') and creds.get('api_secret')),
+        'user_saved': user_saved,
+        'source': creds.get('source', 'user') if creds else None,
+        'api_key': creds.get('api_key') if creds else '',
+        'api_secret_masked': _mask_secret(creds.get('api_secret')) if creds else '',
+        'updated_at': creds.get('updated_at') if creds else None,
+    })
+
+
+@app.route('/api/zerodha/credentials/<user_id>', methods=['POST'])
+def zerodha_credentials_save(user_id):
+    data = get_request_json()
+    api_key = str(data.get('api_key') or '').strip()
+    api_secret = str(data.get('api_secret') or '').strip()
+    if not api_key or not api_secret:
+        return jsonify({'error': 'Enter both Zerodha API Key and API Secret.'}), 400
+    try:
+        db_save_zerodha_credentials(user_id, api_key, api_secret)
+        db_delete_zerodha_session(user_id)
+        return jsonify({'message': 'Zerodha API settings saved. Reconnect Zerodha to generate a fresh access token.', 'configured': True, 'api_key': api_key, 'api_secret_masked': _mask_secret(api_secret)})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/zerodha/credentials/<user_id>/delete', methods=['POST'])
+def zerodha_credentials_delete(user_id):
+    removed = db_delete_zerodha_credentials(user_id)
+    return jsonify({'message': 'Zerodha API settings removed', 'removed': int(removed or 0)})
 
 
 @app.route('/api/zerodha/status/<user_id>', methods=['GET'])
 def zerodha_status(user_id):
     session = _zerodha_safe_session(user_id)
+    creds = db_get_zerodha_credentials(user_id)
     return jsonify({
-        'configured': zerodha_configured(),
+        'configured': bool(creds and creds.get('api_key') and creds.get('api_secret')),
+        'credentials_source': creds.get('source', 'user') if creds else None,
+        'api_key': creds.get('api_key') if creds else None,
         'connected': bool(session),
         'kite_user_id': session.get('kite_user_id') if session else None,
         'user_name': session.get('user_name') if session else None,
@@ -1898,7 +2023,7 @@ def zerodha_status(user_id):
 
 @app.route('/api/zerodha/login-url/<user_id>', methods=['GET'])
 def zerodha_login_url_api(user_id):
-    creds, err = _kite_credentials_or_400()
+    creds, err = _kite_credentials_or_400(user_id)
     if err:
         return jsonify(err[0]), err[1]
     return jsonify({'login_url': kite_login_url(creds['api_key'], state=user_id), 'api_key': creds['api_key']})
@@ -1906,7 +2031,7 @@ def zerodha_login_url_api(user_id):
 
 @app.route('/api/zerodha/session/<user_id>', methods=['POST'])
 def zerodha_session_api(user_id):
-    creds, err = _kite_credentials_or_400()
+    creds, err = _kite_credentials_or_400(user_id)
     if err:
         return jsonify(err[0]), err[1]
     data = get_request_json()
@@ -1939,7 +2064,7 @@ def zerodha_disconnect(user_id):
 
 @app.route('/api/zerodha/sync-holdings/<user_id>', methods=['POST'])
 def zerodha_sync_holdings(user_id):
-    creds, err = _kite_credentials_or_400()
+    creds, err = _kite_credentials_or_400(user_id)
     if err:
         return jsonify(err[0]), err[1]
     session = _zerodha_safe_session(user_id)
@@ -1985,7 +2110,7 @@ def zerodha_sync_holdings(user_id):
 
 @app.route('/api/zerodha/order/<user_id>', methods=['POST'])
 def zerodha_order(user_id):
-    creds, err = _kite_credentials_or_400()
+    creds, err = _kite_credentials_or_400(user_id)
     if err:
         return jsonify(err[0]), err[1]
     session = _zerodha_safe_session(user_id)

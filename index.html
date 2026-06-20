@@ -1357,7 +1357,7 @@ body.light .pd-shell{background:linear-gradient(180deg,#f5f2eb,#edeae2)}body.lig
               <div><i class="fa fa-link"></i> Zerodha Execution Layer</div>
               <span class="zerodha-status" id="zerodha-status-chip">Checking…</span>
             </div>
-            <div class="zerodha-sub">Apex holdings/trades are updated only after Kite returns a confirmed COMPLETE order.</div>
+            <div class="zerodha-sub">Apex holdings/trades are updated only after Kite returns a confirmed COMPLETE order. Save your Kite API Key/Secret in Settings → API Settings before connecting.</div>
             <div class="zerodha-actions">
               <button class="btn btn-outline" onclick="openZerodhaLogin()"><i class="fa fa-arrow-up-right-from-square"></i> Connect Zerodha</button>
               <input class="form-input zerodha-token-input" id="zerodha-request-token" placeholder="Paste request_token after Kite login"/>
@@ -1827,6 +1827,27 @@ body.light .pd-shell{background:linear-gradient(180deg,#f5f2eb,#edeae2)}body.lig
           </div>
           <button class="btn btn-primary" onclick="updateSettingsPassword()"><i class="fa fa-key"></i> Update Password</button>
           <div class="settings-msg" id="settings-password-msg"></div>
+        </div>
+
+        <div class="settings-card">
+          <div class="settings-card-title"><i class="fa fa-plug-circle-bolt"></i> API Settings</div>
+          <div class="zerodha-sub" style="margin-bottom:12px">Save Kite Connect credentials for this login only. These credentials are used for Zerodha order execution and sync.</div>
+          <div class="profile-row"><div class="profile-label">Zerodha Status</div><div class="profile-value" id="settings-zerodha-status">Loading…</div></div>
+          <div class="profile-row"><div class="profile-label">Saved API Key</div><div class="profile-value" id="settings-zerodha-key">—</div></div>
+          <div class="profile-row"><div class="profile-label">API Secret</div><div class="profile-value" id="settings-zerodha-secret-mask">—</div></div>
+          <div class="form-group">
+            <div class="form-label">Zerodha API Key</div>
+            <input class="form-input" id="settings-kite-api-key" placeholder="Enter Kite API Key" autocomplete="off" />
+          </div>
+          <div class="form-group">
+            <div class="form-label">Zerodha API Secret</div>
+            <input class="form-input" type="password" id="settings-kite-api-secret" placeholder="Enter Kite API Secret" autocomplete="new-password" />
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-primary" onclick="saveZerodhaApiSettings()"><i class="fa fa-floppy-disk"></i> Save API Settings</button>
+            <button class="btn btn-outline" onclick="clearZerodhaApiSettings()"><i class="fa fa-trash"></i> Remove API Settings</button>
+          </div>
+          <div class="settings-msg" id="settings-api-msg"></div>
         </div>
       </div>
     </div>
