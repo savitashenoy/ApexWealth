@@ -16,10 +16,20 @@ import numpy as np
 try:
     from .broker_normalizer import normalize_file, BROKER_HINTS
     from .import_trades import match_fifo_to_apex, holding_key, trade_key
+    from .zerodha_layer import (
+        ZerodhaError, kite_login_url, generate_session, get_profile, get_holdings as kite_get_holdings,
+        place_order as kite_place_order, wait_for_complete as kite_wait_for_complete,
+        normalise_exchange_symbol, extract_executed
+    )
 except Exception:
     # Vercel imports api/index.py as a module, local runs may import from cwd.
     from broker_normalizer import normalize_file, BROKER_HINTS
     from import_trades import match_fifo_to_apex, holding_key, trade_key
+    from zerodha_layer import (
+        ZerodhaError, kite_login_url, generate_session, get_profile, get_holdings as kite_get_holdings,
+        place_order as kite_place_order, wait_for_complete as kite_wait_for_complete,
+        normalise_exchange_symbol, extract_executed
+    )
 
 # Pullers/Draggers market page data is optional for auth/core APIs.
 # On Vercel, api/index.py may be imported as a standalone function module,
@@ -73,6 +83,15 @@ PORTFOLIOS_FILE = os.path.join(DATA_DIR, 'portfolios.json')
 WATCHLISTS_FILE = os.path.join(DATA_DIR, 'watchlists.json')
 TRADES_FILE = os.path.join(DATA_DIR, 'trades.json')
 ALERTS_FILE = os.path.join(DATA_DIR, 'portfolio_alerts.json')
+ZERODHA_SESSIONS_FILE = os.path.join(DATA_DIR, 'zerodha_sessions.json')
+
+# Zerodha Kite Connect credentials are configured in Vercel environment variables.
+# The API secret never goes to the browser; the browser only receives login URL/status.
+ZERODHA_API_KEY = os.environ.get('KITE_API_KEY') or os.environ.get('ZERODHA_API_KEY') or ''
+ZERODHA_API_SECRET = os.environ.get('KITE_API_SECRET') or os.environ.get('ZERODHA_API_SECRET') or ''
+
+def zerodha_configured():
+    return bool(ZERODHA_API_KEY and ZERODHA_API_SECRET)
 
 
 # ─── PERSISTENT STORAGE: Neon PostgreSQL on Vercel ───────────────────────────
@@ -280,6 +299,37 @@ def init_db():
                 cur.execute("ALTER TABLE portfolio_alerts ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'portfolio'")
                 cur.execute("UPDATE portfolio_alerts SET source='portfolio' WHERE source IS NULL OR source=''")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_portfolio_alerts_user ON portfolio_alerts(user_id)")
+
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS zerodha_sessions (
+                        user_id TEXT PRIMARY KEY,
+                        access_token TEXT NOT NULL,
+                        public_token TEXT,
+                        kite_user_id TEXT,
+                        user_name TEXT,
+                        email TEXT,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_zerodha_sessions_user ON zerodha_sessions(user_id)")
+
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS zerodha_order_audit (
+                        id TEXT PRIMARY KEY,
+                        user_id TEXT NOT NULL,
+                        order_id TEXT,
+                        symbol TEXT NOT NULL,
+                        transaction_type TEXT NOT NULL,
+                        qty DOUBLE PRECISION NOT NULL DEFAULT 0,
+                        price DOUBLE PRECISION NOT NULL DEFAULT 0,
+                        status TEXT,
+                        apex_updated BOOLEAN NOT NULL DEFAULT FALSE,
+                        payload JSONB,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_zerodha_order_audit_user ON zerodha_order_audit(user_id)")
         DB_INIT_DONE = True
         DB_LAST_ERROR = None
         return True
@@ -531,6 +581,79 @@ def db_delete_trade(user_id, trade_id):
         with conn.cursor() as cur:
             cur.execute('DELETE FROM trades WHERE user_id=%s AND id=%s', (user_id, trade_id))
             return cur.rowcount
+
+
+def db_get_zerodha_session(user_id):
+    if db_configured() and init_db():
+        with db_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute('SELECT user_id, access_token, public_token, kite_user_id, user_name, email, created_at, updated_at FROM zerodha_sessions WHERE user_id=%s', (user_id,))
+                row = cur.fetchone()
+        return _row_to_dict(row) if row else None
+    blob = load_json(ZERODHA_SESSIONS_FILE)
+    return blob.get(user_id)
+
+
+def db_save_zerodha_session(user_id, session):
+    payload = dict(session or {})
+    access_token = payload.get('access_token')
+    if not access_token:
+        raise ValueError('Missing Zerodha access token')
+    if db_configured() and init_db():
+        with db_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO zerodha_sessions (user_id, access_token, public_token, kite_user_id, user_name, email, updated_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,NOW())
+                    ON CONFLICT (user_id) DO UPDATE SET
+                      access_token=EXCLUDED.access_token,
+                      public_token=EXCLUDED.public_token,
+                      kite_user_id=EXCLUDED.kite_user_id,
+                      user_name=EXCLUDED.user_name,
+                      email=EXCLUDED.email,
+                      updated_at=NOW()
+                """, (user_id, access_token, payload.get('public_token'), payload.get('kite_user_id') or payload.get('user_id'), payload.get('user_name') or payload.get('user_shortname'), payload.get('email')))
+        return True
+    blob = load_json(ZERODHA_SESSIONS_FILE)
+    blob[user_id] = {**payload, 'updated_at': datetime.utcnow().isoformat()}
+    save_json(ZERODHA_SESSIONS_FILE, blob)
+    return True
+
+
+def db_delete_zerodha_session(user_id):
+    if db_configured() and init_db():
+        with db_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute('DELETE FROM zerodha_sessions WHERE user_id=%s', (user_id,))
+                return cur.rowcount
+    blob = load_json(ZERODHA_SESSIONS_FILE)
+    existed = 1 if user_id in blob else 0
+    blob.pop(user_id, None)
+    save_json(ZERODHA_SESSIONS_FILE, blob)
+    return existed
+
+
+def db_add_zerodha_order_audit(user_id, order):
+    row = {
+        'id': str(uuid.uuid4()),
+        'user_id': user_id,
+        'order_id': order.get('order_id'),
+        'symbol': order.get('symbol') or '',
+        'transaction_type': order.get('transaction_type') or '',
+        'qty': float(order.get('qty') or 0),
+        'price': float(order.get('price') or 0),
+        'status': order.get('status') or '',
+        'apex_updated': bool(order.get('apex_updated')),
+        'payload': order,
+    }
+    if db_configured() and init_db():
+        with db_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO zerodha_order_audit (id, user_id, order_id, symbol, transaction_type, qty, price, status, apex_updated, payload)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)
+                """, (row['id'], user_id, row['order_id'], row['symbol'], row['transaction_type'], row['qty'], row['price'], row['status'], row['apex_updated'], json.dumps(order)))
+    return row
 
 def db_get_portfolio_alerts(user_id):
     if not init_db():
@@ -1667,6 +1790,263 @@ def sell_holding(user_id, holding_id):
             portfolios[user_id] = holdings
         save_json(PORTFOLIOS_FILE, portfolios)
     return jsonify({'message': 'Sold', 'trade': trade, 'remaining_qty': remaining_qty, 'storage': 'neon' if db_configured() else 'json-fallback'})
+
+
+# ─── ZERODHA EXECUTION AND SYNC LAYER ────────────────────────────────────────
+
+def _kite_credentials_or_400():
+    if not zerodha_configured():
+        return None, ({'error': 'Zerodha is not configured. Set KITE_API_KEY and KITE_API_SECRET in Vercel environment variables.'}, 400)
+    return {'api_key': ZERODHA_API_KEY, 'api_secret': ZERODHA_API_SECRET}, None
+
+
+def _zerodha_safe_session(user_id):
+    session = db_get_zerodha_session(user_id)
+    if not session or not session.get('access_token'):
+        return None
+    return session
+
+
+def _apply_confirmed_buy(user_id, symbol, avg_price, qty, order_date=None):
+    meta = lookup_ticker_meta(symbol)
+    holding = {
+        'id': str(uuid.uuid4()),
+        'symbol': _plain_symbol(symbol),
+        'name': meta.get('name') or _plain_symbol(symbol),
+        'buy_price': round(float(avg_price), 4),
+        'qty': float(qty),
+        'date': order_date or str(date.today()),
+        'industry': meta.get('industry', ''),
+        'sector': meta.get('sector', '')
+    }
+    if db_configured():
+        db_add_holding(user_id, holding)
+    else:
+        portfolios = load_json(PORTFOLIOS_FILE)
+        portfolios.setdefault(user_id, []).append(holding)
+        save_json(PORTFOLIOS_FILE, portfolios)
+    return holding
+
+
+def _apply_confirmed_sell(user_id, holding_id, sell_price, sell_qty):
+    if db_configured():
+        holding = db_get_holding(user_id, holding_id)
+    else:
+        portfolios = load_json(PORTFOLIOS_FILE)
+        holding = next((h for h in portfolios.get(user_id, []) if str(h.get('id')) == str(holding_id)), None)
+    if not holding:
+        raise ValueError('Apex holding not found for confirmed sell update')
+    available_qty = float(holding.get('qty') or 0)
+    sell_qty = float(sell_qty or 0)
+    sell_price = float(sell_price or 0)
+    if sell_qty <= 0 or sell_price <= 0:
+        raise ValueError('Confirmed sell returned invalid quantity/price')
+    if sell_qty > available_qty:
+        raise ValueError(f'Confirmed sell quantity {sell_qty:g} exceeds Apex holding quantity {available_qty:g}')
+    invested_for_sold_qty = float(holding['buy_price']) * sell_qty
+    pnl = (sell_price - float(holding['buy_price'])) * sell_qty
+    trade = {
+        'id': str(uuid.uuid4()),
+        'symbol': holding['symbol'],
+        'name': holding.get('name', holding['symbol']),
+        'buy_price': float(holding['buy_price']),
+        'sell_price': round(sell_price, 4),
+        'qty': sell_qty,
+        'buy_date': holding.get('date'),
+        'sell_date': str(date.today()),
+        'pnl': round(pnl, 2),
+        'pnl_pct': round((pnl / invested_for_sold_qty) * 100, 2) if invested_for_sold_qty else 0
+    }
+    remaining_qty = max(0, round(available_qty - sell_qty, 6))
+    if db_configured():
+        db_add_trade(user_id, trade)
+        db_set_holding_qty_or_delete(user_id, holding_id, remaining_qty)
+    else:
+        trades = load_json(TRADES_FILE)
+        trades.setdefault(user_id, []).append(trade)
+        save_json(TRADES_FILE, trades)
+        portfolios = load_json(PORTFOLIOS_FILE)
+        holdings = portfolios.get(user_id, [])
+        if remaining_qty <= 0:
+            portfolios[user_id] = [h for h in holdings if str(h.get('id')) != str(holding_id)]
+        else:
+            for h in holdings:
+                if str(h.get('id')) == str(holding_id):
+                    h['qty'] = remaining_qty
+                    break
+            portfolios[user_id] = holdings
+        save_json(PORTFOLIOS_FILE, portfolios)
+    return trade, remaining_qty
+
+
+@app.route('/api/zerodha/config', methods=['GET'])
+def zerodha_config():
+    return jsonify({'configured': zerodha_configured(), 'api_key': ZERODHA_API_KEY if ZERODHA_API_KEY else None})
+
+
+@app.route('/api/zerodha/status/<user_id>', methods=['GET'])
+def zerodha_status(user_id):
+    session = _zerodha_safe_session(user_id)
+    return jsonify({
+        'configured': zerodha_configured(),
+        'connected': bool(session),
+        'kite_user_id': session.get('kite_user_id') if session else None,
+        'user_name': session.get('user_name') if session else None,
+        'updated_at': session.get('updated_at') if session else None,
+    })
+
+
+@app.route('/api/zerodha/login-url/<user_id>', methods=['GET'])
+def zerodha_login_url_api(user_id):
+    creds, err = _kite_credentials_or_400()
+    if err:
+        return jsonify(err[0]), err[1]
+    return jsonify({'login_url': kite_login_url(creds['api_key'], state=user_id), 'api_key': creds['api_key']})
+
+
+@app.route('/api/zerodha/session/<user_id>', methods=['POST'])
+def zerodha_session_api(user_id):
+    creds, err = _kite_credentials_or_400()
+    if err:
+        return jsonify(err[0]), err[1]
+    data = get_request_json()
+    request_token = str(data.get('request_token') or '').strip()
+    if not request_token:
+        return jsonify({'error': 'Paste the request_token returned by Zerodha login.'}), 400
+    try:
+        resp = generate_session(creds['api_key'], creds['api_secret'], request_token)
+        sess = resp.get('data') or {}
+        db_save_zerodha_session(user_id, sess)
+        profile = {}
+        try:
+            profile_resp = get_profile(creds['api_key'], sess.get('access_token'))
+            profile = profile_resp.get('data') or {}
+            if profile:
+                sess.update({'kite_user_id': profile.get('user_id'), 'user_name': profile.get('user_name') or profile.get('user_shortname'), 'email': profile.get('email')})
+                db_save_zerodha_session(user_id, sess)
+        except Exception:
+            pass
+        return jsonify({'message': 'Zerodha connected', 'connected': True, 'profile': profile})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/zerodha/disconnect/<user_id>', methods=['POST'])
+def zerodha_disconnect(user_id):
+    removed = db_delete_zerodha_session(user_id)
+    return jsonify({'message': 'Zerodha disconnected', 'removed': int(removed or 0)})
+
+
+@app.route('/api/zerodha/sync-holdings/<user_id>', methods=['POST'])
+def zerodha_sync_holdings(user_id):
+    creds, err = _kite_credentials_or_400()
+    if err:
+        return jsonify(err[0]), err[1]
+    session = _zerodha_safe_session(user_id)
+    if not session:
+        return jsonify({'error': 'Connect Zerodha first.'}), 401
+    try:
+        broker_holdings = kite_get_holdings(creds['api_key'], session['access_token'])
+        current = db_get_holdings(user_id) if db_configured() else load_json(PORTFOLIOS_FILE).get(user_id, [])
+        existing_by_symbol = {_plain_symbol(h.get('symbol')): h for h in (current or [])}
+        added, skipped = 0, 0
+        for row in broker_holdings:
+            qty = float(row.get('quantity') or row.get('t1_quantity') or 0)
+            if qty <= 0:
+                continue
+            symbol = _plain_symbol(row.get('tradingsymbol') or row.get('symbol'))
+            if not symbol:
+                skipped += 1
+                continue
+            avg_price = float(row.get('average_price') or row.get('price') or 0)
+            if avg_price <= 0:
+                skipped += 1
+                continue
+            if symbol in existing_by_symbol:
+                skipped += 1
+                continue
+            meta = lookup_ticker_meta(symbol)
+            holding = {
+                'id': str(uuid.uuid4()), 'symbol': symbol, 'name': meta.get('name') or symbol,
+                'buy_price': round(avg_price, 4), 'qty': qty, 'date': str(date.today()),
+                'industry': meta.get('industry', ''), 'sector': meta.get('sector', '')
+            }
+            if db_configured():
+                db_add_holding(user_id, holding)
+            else:
+                portfolios = load_json(PORTFOLIOS_FILE)
+                portfolios.setdefault(user_id, []).append(holding)
+                save_json(PORTFOLIOS_FILE, portfolios)
+            added += 1
+        return jsonify({'message': 'Zerodha holdings synced', 'added': added, 'skipped_existing_or_invalid': skipped, 'broker_rows': len(broker_holdings)})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/zerodha/order/<user_id>', methods=['POST'])
+def zerodha_order(user_id):
+    creds, err = _kite_credentials_or_400()
+    if err:
+        return jsonify(err[0]), err[1]
+    session = _zerodha_safe_session(user_id)
+    if not session:
+        return jsonify({'error': 'Connect Zerodha first.'}), 401
+    data = get_request_json()
+    tx = str(data.get('transaction_type') or data.get('side') or '').upper().strip()
+    if tx not in ('BUY', 'SELL'):
+        return jsonify({'error': 'transaction_type must be BUY or SELL'}), 400
+    symbol = _plain_symbol(data.get('symbol'))
+    exchange, tradingsymbol = normalise_exchange_symbol(symbol)
+    qty = int(float(data.get('qty') or data.get('quantity') or 0))
+    if qty <= 0:
+        return jsonify({'error': 'Enter a valid order quantity'}), 400
+    order_type = str(data.get('order_type') or 'MARKET').upper()
+    product = str(data.get('product') or 'CNC').upper()
+    validity = str(data.get('validity') or 'DAY').upper()
+    variety = str(data.get('variety') or 'regular').lower()
+    price = float(data.get('price') or 0)
+    payload = {
+        'exchange': exchange,
+        'tradingsymbol': tradingsymbol,
+        'transaction_type': tx,
+        'quantity': qty,
+        'product': product,
+        'order_type': order_type,
+        'validity': validity,
+    }
+    if order_type == 'LIMIT':
+        if price <= 0:
+            return jsonify({'error': 'Limit orders require a valid price'}), 400
+        payload['price'] = price
+    try:
+        placed = kite_place_order(creds['api_key'], session['access_token'], variety=variety, **payload)
+        order_id = (placed.get('data') or {}).get('order_id')
+        if not order_id:
+            return jsonify({'error': 'Zerodha did not return an order_id', 'response': placed}), 400
+        final = kite_wait_for_complete(creds['api_key'], session['access_token'], order_id, timeout_sec=int(data.get('confirm_timeout_sec') or 12))
+        status = str(final.get('status') or '').upper()
+        exec_qty, exec_price = extract_executed(final, fallback_qty=qty, fallback_price=price)
+        audit = {'order_id': order_id, 'symbol': symbol, 'transaction_type': tx, 'qty': exec_qty, 'price': exec_price, 'status': status, 'apex_updated': False, 'final': final}
+        if status != 'COMPLETE':
+            db_add_zerodha_order_audit(user_id, audit)
+            return jsonify({'message': 'Order placed but not confirmed complete. Apex holdings were not updated.', 'order_id': order_id, 'status': status, 'apex_updated': False, 'order': final}), 202
+        if exec_qty <= 0 or exec_price <= 0:
+            db_add_zerodha_order_audit(user_id, audit)
+            return jsonify({'error': 'Order is COMPLETE but executed quantity/average price was not available. Apex holdings were not updated.', 'order_id': order_id, 'order': final}), 400
+        apex = None
+        if tx == 'BUY':
+            apex = _apply_confirmed_buy(user_id, symbol, exec_price, exec_qty)
+        else:
+            holding_id = str(data.get('holding_id') or '').strip()
+            if not holding_id:
+                return jsonify({'error': 'holding_id is required for broker SELL so Apex can update the correct holding after confirmation.', 'order_id': order_id}), 400
+            trade, remaining_qty = _apply_confirmed_sell(user_id, holding_id, exec_price, exec_qty)
+            apex = {'trade': trade, 'remaining_qty': remaining_qty}
+        audit['apex_updated'] = True
+        db_add_zerodha_order_audit(user_id, audit)
+        return jsonify({'message': 'Order COMPLETE. Apex updated from confirmed Zerodha execution.', 'order_id': order_id, 'status': status, 'apex_updated': True, 'executed_qty': exec_qty, 'executed_price': exec_price, 'apex': apex, 'order': final})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
 
 # ─── IMPORT BROKER TRADES ─────────────────────────────────────────────────────
 

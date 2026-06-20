@@ -911,6 +911,22 @@ body.light .allocation-title-chip { background: #2a6496; color: #fff !important;
 @media(max-width:900px) { .snapshot-card-grid { grid-template-columns: repeat(2, 1fr); } }
 @media(max-width:600px) { .snapshot-card-grid { grid-template-columns: 1fr; } }
 
+/* ── ZERODHA EXECUTION PANEL ── */
+.zerodha-panel { margin-top: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--card2); }
+.zerodha-head { display:flex; align-items:center; justify-content:space-between; gap:10px; font-family:'Syne',sans-serif; font-weight:900; color:var(--text); }
+.zerodha-status { padding:4px 9px; border-radius:999px; font-size:.68rem; font-family:'JetBrains Mono',monospace; border:1px solid var(--border2); color:var(--dim); }
+.zerodha-status.connected { color: var(--green); border-color: rgba(0,240,96,.45); background: rgba(0,240,96,.08); }
+.zerodha-status.not-connected { color: var(--red); border-color: rgba(255,44,44,.35); background: rgba(255,44,44,.06); }
+.zerodha-sub { margin-top: 5px; color: var(--dim); font-size: .78rem; line-height:1.4; }
+.zerodha-actions { margin-top: 10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.zerodha-token-input { max-width: 300px; min-width: 240px; }
+.zerodha-msg { margin-top:8px; font-size:.78rem; color: var(--dim); }
+.zerodha-msg.ok { color: var(--green); }
+.zerodha-msg.err { color: var(--red); }
+body.light .zerodha-panel { background:#f5f2eb; border-color:#d6d0c6; }
+body.light .zerodha-status.connected { color:#2E6F40; background:rgba(46,111,64,.12); border-color:rgba(46,111,64,.3); }
+body.light .zerodha-status.not-connected { color:#FF2C2C; background:rgba(255,44,44,.08); border-color:rgba(255,44,44,.25); }
+
 /* ── EMPTY STATES ── */
 .empty-state { text-align: center; padding: 60px 20px; color: var(--dim); font-family: 'Syne', sans-serif; }
 .empty-state i { font-size: 2rem; margin-bottom: 12px; display: block; color: var(--border2); }
@@ -1329,10 +1345,28 @@ body.light .pd-shell{background:linear-gradient(180deg,#f5f2eb,#edeae2)}body.lig
             </div>
             <div class="form-group">
               <div class="form-label">&nbsp;</div>
-              <button class="btn btn-primary" onclick="addHolding()"><i class="fa fa-plus"></i> Add</button>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button class="btn btn-primary" onclick="addHolding()"><i class="fa fa-plus"></i> Add</button>
+                <button class="btn btn-outline" onclick="addHoldingViaZerodha()"><i class="fa fa-bolt"></i> Buy via Zerodha</button>
+              </div>
             </div>
           </div>
           <div class="auth-error" id="add-error" style="margin-top:8px"></div>
+          <div class="zerodha-panel" id="zerodha-panel">
+            <div class="zerodha-head">
+              <div><i class="fa fa-link"></i> Zerodha Execution Layer</div>
+              <span class="zerodha-status" id="zerodha-status-chip">Checking…</span>
+            </div>
+            <div class="zerodha-sub">Apex holdings/trades are updated only after Kite returns a confirmed COMPLETE order.</div>
+            <div class="zerodha-actions">
+              <button class="btn btn-outline" onclick="openZerodhaLogin()"><i class="fa fa-arrow-up-right-from-square"></i> Connect Zerodha</button>
+              <input class="form-input zerodha-token-input" id="zerodha-request-token" placeholder="Paste request_token after Kite login"/>
+              <button class="btn btn-primary" onclick="saveZerodhaSession()"><i class="fa fa-key"></i> Save Token</button>
+              <button class="btn btn-outline" onclick="syncZerodhaHoldings()"><i class="fa fa-rotate"></i> Sync Holdings</button>
+              <button class="btn btn-outline" onclick="disconnectZerodha()"><i class="fa fa-unlink"></i> Disconnect</button>
+            </div>
+            <div class="zerodha-msg" id="zerodha-msg"></div>
+          </div>
         </div>
 
         <div class="portfolio-load-progress" id="holdings-load-progress">
@@ -1855,6 +1889,7 @@ body.light .pd-shell{background:linear-gradient(180deg,#f5f2eb,#edeae2)}body.lig
       <div class="auth-error" id="sell-error"></div>
       <div class="modal-btns">
         <button class="btn btn-outline" onclick="closeSellModal()">Cancel</button>
+        <button class="btn btn-outline" onclick="confirmZerodhaSell()"><i class="fa fa-bolt"></i> Sell via Zerodha</button>
         <button class="btn btn-primary" onclick="confirmSell()" style="background:#f0c040;color:#000">Sell</button>
       </div>
     </div>
@@ -2593,6 +2628,7 @@ async function loadPortfolio() {
     if (document.getElementById('tab-performance')?.classList.contains('active')) await loadTrades();
     setPortfolioLoadProgress('holdings', 100, 'Holdings loaded', true);
     setLastUpdated('Portfolio');
+    loadZerodhaStatus();
   } catch(err) {
     const tbody = document.getElementById('holdings-tbody');
     if (tbody) tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state"><i class="fa fa-triangle-exclamation"></i><p>${escapeHtml(err.message || 'Failed to load holdings')}</p></div></td></tr>`;
@@ -2971,6 +3007,132 @@ async function deleteHolding(id, ev) {
     renderPortfolioCards(holdingsData);
     alert(e.message || 'Could not remove holding.');
   }
+}
+
+
+// ZERODHA EXECUTION AND SYNC LAYER
+let zerodhaConnected = false;
+function setZerodhaMessage(msg, ok=false) {
+  const el = document.getElementById('zerodha-msg');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.className = `zerodha-msg ${msg ? (ok ? 'ok' : 'err') : ''}`;
+}
+function setZerodhaStatusChip(status) {
+  const chip = document.getElementById('zerodha-status-chip');
+  if (!chip) return;
+  zerodhaConnected = !!status?.connected;
+  if (!status?.configured) {
+    chip.textContent = 'Not configured';
+    chip.className = 'zerodha-status not-connected';
+  } else if (status.connected) {
+    chip.textContent = `Connected${status.kite_user_id ? ' · '+status.kite_user_id : ''}`;
+    chip.className = 'zerodha-status connected';
+  } else {
+    chip.textContent = 'Not connected';
+    chip.className = 'zerodha-status not-connected';
+  }
+}
+async function loadZerodhaStatus() {
+  if (!USER) return;
+  try {
+    const data = await fetchJsonSafe(`${API}/zerodha/status/${encodeURIComponent(USER.user_id)}`, {cache:'no-store'});
+    setZerodhaStatusChip(data);
+  } catch(e) {
+    setZerodhaStatusChip({configured:false, connected:false});
+  }
+}
+async function openZerodhaLogin() {
+  if (!USER) return alert('Login required');
+  setZerodhaMessage('');
+  try {
+    const data = await fetchJsonSafe(`${API}/zerodha/login-url/${encodeURIComponent(USER.user_id)}`, {cache:'no-store'});
+    window.open(data.login_url, '_blank', 'noopener,noreferrer');
+    setZerodhaMessage('After Kite login, copy request_token from the redirected URL and paste it here.', true);
+  } catch(e) { setZerodhaMessage(e.message || 'Could not create Kite login URL'); }
+}
+async function saveZerodhaSession() {
+  if (!USER) return alert('Login required');
+  const token = document.getElementById('zerodha-request-token')?.value?.trim();
+  if (!token) { setZerodhaMessage('Paste the request_token returned by Kite login.'); return; }
+  try {
+    const data = await fetchJsonSafe(`${API}/zerodha/session/${encodeURIComponent(USER.user_id)}`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, cache:'no-store', body:JSON.stringify({request_token:token})
+    });
+    document.getElementById('zerodha-request-token').value = '';
+    setZerodhaMessage(data.message || 'Zerodha connected', true);
+    await loadZerodhaStatus();
+  } catch(e) { setZerodhaMessage(e.message || 'Could not connect Zerodha'); }
+}
+async function disconnectZerodha() {
+  if (!USER) return;
+  if (!confirm('Disconnect Zerodha for this Apex account?')) return;
+  try {
+    await fetchJsonSafe(`${API}/zerodha/disconnect/${encodeURIComponent(USER.user_id)}`, {method:'POST', cache:'no-store'});
+    setZerodhaMessage('Zerodha disconnected', true);
+    await loadZerodhaStatus();
+  } catch(e) { setZerodhaMessage(e.message || 'Disconnect failed'); }
+}
+async function syncZerodhaHoldings() {
+  if (!USER) return;
+  setZerodhaMessage('Syncing Zerodha holdings…', true);
+  try {
+    const data = await fetchJsonSafe(`${API}/zerodha/sync-holdings/${encodeURIComponent(USER.user_id)}`, {method:'POST', cache:'no-store'});
+    setZerodhaMessage(`Sync complete: ${data.added || 0} added, ${data.skipped_existing_or_invalid || 0} skipped.`, true);
+    await loadPortfolio();
+    loadDashboard();
+  } catch(e) { setZerodhaMessage(e.message || 'Sync failed'); }
+}
+async function addHoldingViaZerodha() {
+  const date = document.getElementById('add-date').value;
+  const price = parseFloat(document.getElementById('add-price').value);
+  const qty = parseFloat(document.getElementById('add-qty').value);
+  const errEl = document.getElementById('add-error');
+  errEl.textContent = '';
+  if (!selectedTicker) { errEl.textContent = 'Select a ticker from the dropdown'; return; }
+  if (!qty || qty <= 0) { errEl.textContent = 'Enter a valid quantity'; return; }
+  const orderType = price && price > 0 ? 'LIMIT' : 'MARKET';
+  if (!confirm(`${orderType} BUY via Zerodha for ${selectedTicker.symbol}, Qty ${qty}${orderType==='LIMIT' ? ', Limit ₹'+price : ''}? Apex will update only after COMPLETE confirmation.`)) return;
+  try {
+    errEl.textContent = 'Placing Zerodha order…';
+    const data = await fetchJsonSafe(`${API}/zerodha/order/${encodeURIComponent(USER.user_id)}`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, cache:'no-store',
+      body: JSON.stringify({transaction_type:'BUY', symbol:selectedTicker.symbol, qty, price: price || 0, order_type: orderType, product:'CNC', requested_date: date})
+    });
+    if (!data.apex_updated) throw new Error(data.message || 'Order not confirmed complete; Apex was not updated.');
+    document.getElementById('add-ticker').value = '';
+    document.getElementById('add-price').value = '';
+    document.getElementById('add-qty').value = '';
+    document.getElementById('add-date').value = new Date().toISOString().split('T')[0];
+    selectedTicker = null;
+    errEl.textContent = '';
+    setZerodhaMessage(`BUY complete: ${data.executed_qty} @ ₹${data.executed_price}. Apex holdings updated.`, true);
+    await loadPortfolio();
+    loadDashboard();
+  } catch(e) { errEl.textContent = e.message || 'Zerodha BUY failed'; }
+}
+async function confirmZerodhaSell() {
+  const sell_price = parseFloat(document.getElementById('sell-price').value);
+  const sell_qty = parseFloat(document.getElementById('sell-qty').value);
+  const symbol = document.getElementById('sell-symbol').value;
+  const err = document.getElementById('sell-error');
+  err.textContent = '';
+  if (!sell_qty || sell_qty <= 0) { err.textContent = 'Enter a valid sell quantity'; return; }
+  const orderType = sell_price && sell_price > 0 ? 'LIMIT' : 'MARKET';
+  if (!confirm(`${orderType} SELL via Zerodha for ${symbol}, Qty ${sell_qty}${orderType==='LIMIT' ? ', Limit ₹'+sell_price : ''}? Apex will update only after COMPLETE confirmation.`)) return;
+  try {
+    err.textContent = 'Placing Zerodha sell order…';
+    const data = await fetchJsonSafe(`${API}/zerodha/order/${encodeURIComponent(USER.user_id)}`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, cache:'no-store',
+      body: JSON.stringify({transaction_type:'SELL', symbol, qty:sell_qty, price:sell_price || 0, order_type:orderType, product:'CNC', holding_id:sellHoldingId})
+    });
+    if (!data.apex_updated) throw new Error(data.message || 'Order not confirmed complete; Apex was not updated.');
+    closeSellModal();
+    setZerodhaMessage(`SELL complete: ${data.executed_qty} @ ₹${data.executed_price}. Apex holdings/trades updated.`, true);
+    await loadPortfolio();
+    await loadTrades();
+    loadDashboard();
+  } catch(e) { err.textContent = e.message || 'Zerodha SELL failed'; }
 }
 
 

@@ -79,3 +79,14 @@ then the environment variable still contains the example placeholder. Replace it
 - Tables are auto-created on first successful request.
 - Local development still works using JSON fallback when `DATABASE_URL` is not set.
 - Vercel serverless `/tmp` JSON fallback is not persistent, so set a valid `DATABASE_URL` for production.
+
+## Optional Zerodha Kite variables
+
+For live broker execution, add these variables in Vercel and redeploy:
+
+```text
+KITE_API_KEY=your_kite_connect_api_key
+KITE_API_SECRET=your_kite_connect_api_secret
+```
+
+The app stores each logged-in user's daily Kite access token in Neon and uses it from the backend only. Holdings/trades are updated only after Zerodha confirms order status `COMPLETE`.

@@ -101,3 +101,24 @@ The Admin panel includes a **Create Members** tab with:
 - Managing User Accounts: search, list users, edit password/user name, delete user
 
 Passwords are stored as SHA-256 hashes for app compatibility and are shown as masked values in the Admin table. Use the edit icon to reset a user password.
+
+## Zerodha Kite execution layer
+
+This build includes an optional Zerodha execution and sync layer. Configure these Vercel environment variables before using it:
+
+```text
+KITE_API_KEY=your_kite_connect_api_key
+KITE_API_SECRET=your_kite_connect_api_secret
+```
+
+Use Zerodha Developer Console to set your redirect URL. After Kite login, copy the `request_token` from the redirected URL and paste it into the Zerodha panel in Portfolio → Holdings. ApexWealth only updates Holdings/Performance Report after Kite order history confirms the order status is `COMPLETE`.
+
+Available APIs:
+
+- `GET /api/zerodha/config`
+- `GET /api/zerodha/status/<user_id>`
+- `GET /api/zerodha/login-url/<user_id>`
+- `POST /api/zerodha/session/<user_id>`
+- `POST /api/zerodha/order/<user_id>`
+- `POST /api/zerodha/sync-holdings/<user_id>`
+- `POST /api/zerodha/disconnect/<user_id>`
