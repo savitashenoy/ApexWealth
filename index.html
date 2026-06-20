@@ -1056,11 +1056,6 @@ body.dark .watchlist-heatmap-table .hm-name { color: var(--text-secondary); }
 .screener-ema-conditions { grid-template-columns: repeat(5, minmax(105px, 1fr)); gap:6px; }
 .screener-ema-conditions label { font-size:.56rem; letter-spacing:.45px; gap:3px; }
 .screener-ema-conditions input, .screener-ema-conditions select { padding:6px 7px; font-size:.66rem; border-radius:7px; min-width:0; }
-.screener-bigorder-conditions { grid-template-columns: minmax(140px, 1.3fr) repeat(3, minmax(100px, 1fr)); gap:6px; }
-.screener-bigorder-conditions label { font-size:.56rem; letter-spacing:.45px; gap:3px; }
-.screener-bigorder-conditions input, .screener-bigorder-conditions select { padding:6px 7px; font-size:.66rem; border-radius:7px; min-width:0; }
-.screener-bigorder-long td { background:rgba(46,111,64,.22) !important; }
-.screener-bigorder-short td { background:rgba(255,44,44,.18) !important; }
 .screener-progress-card { display:flex; flex-direction:column; gap:10px; justify-content:center; }
 .screener-status-line { color:var(--text-secondary); font-family:'JetBrains Mono', monospace; font-size:.76rem; }
 .screener-progress-track { height:10px; background:var(--bg); border:1px solid var(--border); border-radius:999px; overflow:hidden; }
@@ -1101,9 +1096,9 @@ body.dark .watchlist-heatmap-table .hm-name { color: var(--text-secondary); }
 .screener-bearish-row td, .screener-pa-lower-row td { background:#FF2C2C !important; color:#fff !important; font-weight:900; }
 .screener-pa-mid-row td { background:#e6a043 !important; color:#111 !important; font-weight:900; }
 body.light .screener-card, body.light .screener-tab-btn { background:#f5f2eb; }
-@media (max-width: 1180px) { .screener-volume-conditions, .screener-ema-conditions, .screener-bigorder-conditions, .screener-compact-conditions, .screener-filter-conditions, .screener-pa-filters { grid-template-columns:repeat(3,1fr); } .screener-condition-header, .screener-condition-row { grid-template-columns:40px repeat(3, minmax(90px, 1fr)); } }
+@media (max-width: 1180px) { .screener-volume-conditions, .screener-ema-conditions, .screener-compact-conditions, .screener-filter-conditions, .screener-pa-filters { grid-template-columns:repeat(3,1fr); } .screener-condition-header, .screener-condition-row { grid-template-columns:40px repeat(3, minmax(90px, 1fr)); } }
 @media (max-width: 980px) { .screener-hero { grid-template-columns:1fr; } .screener-controls { grid-template-columns:repeat(2,1fr); } .screener-top-controls { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 620px) { .screener-controls, .screener-top-controls, .screener-volume-conditions, .screener-ema-conditions, .screener-bigorder-conditions, .screener-compact-conditions, .screener-filter-conditions, .screener-pa-filters, .screener-condition-header, .screener-condition-row { grid-template-columns:1fr; } }
+@media (max-width: 620px) { .screener-controls, .screener-top-controls, .screener-volume-conditions, .screener-ema-conditions, .screener-compact-conditions, .screener-filter-conditions, .screener-pa-filters, .screener-condition-header, .screener-condition-row { grid-template-columns:1fr; } }
 
 
 
@@ -1655,7 +1650,7 @@ body.light .pd-shell{background:linear-gradient(180deg,#f5f2eb,#edeae2)}body.lig
       <div class="screener-hero">
         <div class="screener-card">
           <div class="screener-title"><i class="fa fa-radar"></i> Integrated Stock Scanner</div>
-          <div class="screener-sub">Run EMA + RSI, Volume & Price Breakout, Opening Range Breakout, Price Action, and Big Order scans from the bundled Excel sheet source. Results stream live with progress updates.</div>
+          <div class="screener-sub">Run EMA + RSI, Volume & Price Breakout, Opening Range Breakout, and Price Action scans from the bundled Excel sheet source. Results stream live with progress updates.</div>
           <div class="screener-controls screener-top-controls">
             <label>Sheet Source<select id="screener-sheet-select"></select></label>
             <button class="btn btn-outline" onclick="screenerLoadSymbols()"><i class="fa fa-list"></i> Load Symbols</button>
@@ -1673,7 +1668,6 @@ body.light .pd-shell{background:linear-gradient(180deg,#f5f2eb,#edeae2)}body.lig
         <button class="screener-tab-btn" data-screener-tab="volume" onclick="screenerSwitchTab('volume', this)">Volume & Price Breakout</button>
         <button class="screener-tab-btn" data-screener-tab="orb" onclick="screenerSwitchTab('orb', this)">Opening Range Breakout</button>
         <button class="screener-tab-btn" data-screener-tab="priceaction" onclick="screenerSwitchTab('priceaction', this)">Price Action Conditions</button>
-        <button class="screener-tab-btn" data-screener-tab="bigorder" onclick="screenerSwitchTab('bigorder', this)">Big Order Scanner</button>
       </div>
 
       <div class="screener-panel active" id="screener-panel-ema">
@@ -1769,33 +1763,6 @@ body.light .pd-shell{background:linear-gradient(180deg,#f5f2eb,#edeae2)}body.lig
             <button class="btn btn-outline" onclick="screenerClearResults('priceaction')"><i class="fa fa-trash"></i> Clear Results</button>
           </div>
           <div class="screener-table-wrap"><table><thead><tr><th>Symbol</th><th>LTP</th><th>Change %</th><th>RSI</th><th>BB Position</th><th>D-Close %</th><th>W-Close %</th><th>M-Close %</th><th>Volume</th><th>10DayVol</th><th>Chart</th></tr></thead><tbody id="screener-pa-tbody"></tbody></table></div>
-        </div>
-      </div>
-
-      <div class="screener-panel" id="screener-panel-bigorder">
-        <div class="screener-card">
-          <div class="screener-title">Big Order Scanner</div>
-          <div class="screener-sub">Flags recent Medium/Large unusual-volume candles using traded value percentile, relative volume, liquidity and recency score.</div>
-          <div class="screener-controls screener-bigorder-conditions">
-            <label>Timeframes
-              <select id="screener-bigorder-timeframes" multiple size="4">
-                <option value="15min" selected>15min</option>
-                <option value="30min" selected>30min</option>
-                <option value="60min" selected>60min</option>
-                <option value="1day" selected>1D</option>
-              </select>
-            </label>
-            <label>Size<select id="screener-bigorder-size"><option>All</option><option>Large</option><option>Medium</option></select></label>
-            <label>Side<select id="screener-bigorder-side"><option>All</option><option>Long</option><option>Short</option><option>Flat</option></select></label>
-            <label>Min Score<input id="screener-bigorder-min-score" type="number" value="" placeholder="Any" step="0.1"></label>
-          </div>
-          <div class="screener-actions">
-            <button class="btn btn-primary screener-run-btn" onclick="screenerRunScan('bigorder')"><i class="fa fa-play"></i> Run Scan</button>
-            <button class="btn btn-outline screener-stop-btn" onclick="screenerStopScan()" disabled><i class="fa fa-stop"></i> Stop Scan</button>
-            <button class="btn btn-outline" onclick="screenerClearResults('bigorder')"><i class="fa fa-trash"></i> Clear Results</button>
-          </div>
-          <div class="screener-table-wrap"><table><thead><tr><th>Ticker</th><th>TF</th><th>Side</th><th>Size</th><th>Score</th><th>Percentile</th><th>RelVol20</th><th>Price</th><th>Volume</th><th>Time Since</th><th>Chart</th></tr></thead><tbody id="screener-bigorder-tbody"></tbody></table></div>
-          <div class="ticker-legend screener-sub" style="margin-top:10px">Large = percentile ≥ 97, Medium = percentile ≥ 90. Score combines percentile, relative volume, liquidity and recency.</div>
         </div>
       </div>
 
@@ -4420,7 +4387,7 @@ function dashboardAllocationDoughnutOpts(totalInvested) {
 // SCREENER
 // ──────────────────────────────────────────────────────────────────────────────
 let screenerActive = 'ema';
-let screenerResults = { ema: [], volume: [], orb: [], ohl: [], priceaction: [], bigorder: [] };
+let screenerResults = { ema: [], volume: [], orb: [], ohl: [], priceaction: [] };
 let screenerRunning = false;
 let screenerAbortController = null;
 let screenerInitialized = false;
@@ -4544,22 +4511,11 @@ function screenerPriceActionConfig() {
   });
   return { conditions };
 }
-function screenerBigOrderConfig() {
-  const select = screenerEl('screener-bigorder-timeframes');
-  const timeframes = select ? Array.from(select.selectedOptions).map(o => o.value) : ['15min','30min','60min','1day'];
-  return {
-    timeframes: timeframes.length ? timeframes : ['15min','30min','60min','1day'],
-    size: screenerEl('screener-bigorder-size')?.value || 'All',
-    side: screenerEl('screener-bigorder-side')?.value || 'All',
-    min_score: screenerEl('screener-bigorder-min-score')?.value || ''
-  };
-}
 function screenerConfig(scanner) {
   if (scanner === 'ema') return screenerEmaConfig();
   if (scanner === 'volume') return screenerVolumeConfig();
   if (scanner === 'orb') return screenerOrbConfig();
   if (scanner === 'priceaction') return screenerPriceActionConfig();
-  if (scanner === 'bigorder') return screenerBigOrderConfig();
   return {};
 }
 function screenerSetControls(running) {
@@ -4581,9 +4537,6 @@ function screenerClearResults(scanner = screenerActive) {
   } else if (scanner === 'priceaction') {
     screenerResults.priceaction = [];
     const paBody = screenerEl('screener-pa-tbody'); if (paBody) paBody.innerHTML = '';
-  } else if (scanner === 'bigorder') {
-    screenerResults.bigorder = [];
-    const boBody = screenerEl('screener-bigorder-tbody'); if (boBody) boBody.innerHTML = '';
   } else {
     screenerResults[scanner] = [];
     const tbody = screenerEl(scanner === 'ema' ? 'screener-ema-tbody' : 'screener-volume-tbody');
@@ -4694,23 +4647,11 @@ function screenerRedrawPriceActionTable() {
   const tbody = screenerEl('screener-pa-tbody'); if (tbody) tbody.innerHTML = '';
   (screenerResults.priceaction || []).forEach((row) => screenerAppendPriceAction(row, false));
 }
-function screenerAppendBigOrder(row) {
-  screenerResults.bigorder.push(row);
-  const tbody = screenerEl('screener-bigorder-tbody'); if (!tbody) return;
-  const tr = document.createElement('tr');
-  const side = String(row.Side || row.side || '');
-  if (side === 'Long') tr.classList.add('screener-bigorder-long');
-  if (side === 'Short') tr.classList.add('screener-bigorder-short');
-  const interval = (row.Timeframe || row.timeframe) === '1day' ? 'D' : ((row.Timeframe || row.timeframe) === '60min' ? '60' : ((row.Timeframe || row.timeframe) === '30min' ? '30' : '15'));
-  tr.innerHTML = `<td>${escapeHtml(row.Ticker || row.symbol)}</td><td>${escapeHtml(row.Timeframe || row.timeframe)}</td><td>${escapeHtml(side)}</td><td>${escapeHtml(row.Size || row.size)}</td><td>${escapeHtml(row.CompositeScore ?? row.composite_score)}</td><td>${escapeHtml(row.Percentile ?? row.percentile)}</td><td>${escapeHtml(row.RelVolume20 ?? row.rel_volume_20)}</td><td>${escapeHtml(row.Price ?? row.price)}</td><td>${Number(row.Volume || row.volume || 0).toLocaleString()}</td><td>${escapeHtml(row.TimeSince || row.time_since || '')}</td><td><a class="screener-chart-link" href="${screenerTradingViewUrl(row.Ticker || row.symbol, interval)}" target="_blank" rel="noopener">Open</a></td>`;
-  tbody.appendChild(tr);
-}
 function screenerAppendResult(scanner, row) {
   if (scanner === 'ema') return screenerAppendEma(row);
   if (scanner === 'volume') return screenerAppendVolume(row);
   if (scanner === 'orb') return screenerAppendOrb(row);
   if (scanner === 'priceaction') return screenerAppendPriceAction(row, true);
-  if (scanner === 'bigorder') return screenerAppendBigOrder(row);
 }
 function screenerSwitchOrbSubtab(button) {
   document.querySelectorAll('.screener-orb-sub-tab').forEach(btn => btn.classList.remove('active'));
