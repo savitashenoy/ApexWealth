@@ -1171,7 +1171,7 @@ async function confirmEdit() {
 
 // PORTFOLIO TABS
 function switchPortTab(tab) {
-  const tabs = ['holdings','alerts','performance'];
+  const tabs = ['holdings','api-connect','alerts','performance'];
   document.querySelectorAll('#page-portfolio .tabs-bar .tab-btn').forEach((b,i) => {
     b.classList.toggle('active', tabs[i] === tab);
   });
@@ -1179,6 +1179,7 @@ function switchPortTab(tab) {
   const target = document.getElementById(`tab-${tab}`);
   if (target) target.classList.add('active');
   if (tab === 'performance') loadTrades();
+  if (tab === 'api-connect') refreshZerodhaStatus();
   if (tab === 'alerts') loadPortfolioAlerts();
 }
 
@@ -1221,9 +1222,13 @@ function renderAllocationCharts() {
 
 function resetPerformanceSummary() {
   document.getElementById('perf-total-trades').textContent = 0;
+  document.getElementById('perf-winning-trades').textContent = 0;
+  document.getElementById('perf-losing-trades').textContent = 0;
   document.getElementById('perf-realised').textContent = '₹0';
   document.getElementById('perf-realised').className = 'card-value td-mono';
   document.getElementById('perf-win-rate').textContent = '0%';
+  document.getElementById('perf-avg-profit').textContent = '₹0';
+  document.getElementById('perf-avg-loss').textContent = '₹0';
   document.getElementById('perf-best').textContent = '₹0';
 }
 
@@ -1289,14 +1294,24 @@ async function loadTrades() {
     }
 
     const totalPnl = tradesData.reduce((s,t) => s + Number(t.pnl || 0), 0);
-    const wins = tradesData.filter(t => Number(t.pnl || 0) > 0).length;
-    const best = Math.max(...tradesData.map(t => Number(t.pnl || 0)));
+    const winningTrades = tradesData.filter(t => Number(t.pnl || 0) > 0);
+    const losingTrades = tradesData.filter(t => Number(t.pnl || 0) < 0);
+    const wins = winningTrades.length;
+    const avgProfit = winningTrades.length ? winningTrades.reduce((s,t) => s + Number(t.pnl || 0), 0) / winningTrades.length : 0;
+    const avgLoss = losingTrades.length ? losingTrades.reduce((s,t) => s + Math.abs(Number(t.pnl || 0)), 0) / losingTrades.length : 0;
+    const totalInvestedForTrades = tradesData.reduce((s,t) => s + (Number(t.buy_price || 0) * Number(t.qty || 0)), 0);
+    const roi = totalInvestedForTrades ? (totalPnl / totalInvestedForTrades) * 100 : 0;
 
     document.getElementById('perf-total-trades').textContent = tradesData.length;
+    document.getElementById('perf-winning-trades').textContent = winningTrades.length;
+    document.getElementById('perf-losing-trades').textContent = losingTrades.length;
     document.getElementById('perf-realised').textContent = `${totalPnl >= 0 ? '+' : ''}₹${fmtNum(totalPnl)}`;
     document.getElementById('perf-realised').className = `card-value td-mono ${totalPnl >= 0 ? 'green' : 'red'}`;
     document.getElementById('perf-win-rate').textContent = `${((wins/tradesData.length)*100).toFixed(0)}%`;
-    document.getElementById('perf-best').textContent = `₹${fmtNum(best)}`;
+    document.getElementById('perf-avg-profit').textContent = `₹${fmtNum(avgProfit)}`;
+    document.getElementById('perf-avg-loss').textContent = `₹${fmtNum(avgLoss)}`;
+    document.getElementById('perf-best').textContent = `${roi >= 0 ? '+' : ''}${roi.toFixed(2)}%`;
+    document.getElementById('perf-best').className = `card-value td-mono ${roi >= 0 ? 'green' : 'red'}`;
 
     renderTradesTable(tradesData);
     renderPerformanceChart(tradesData);
@@ -1511,6 +1526,47 @@ function exportPortfolioCSV() {
   const a = document.createElement('a');
   a.href = url;
   a.download = `apexwealth_portfolio_${USER?.email || 'holdings'}_${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportPerformanceCSV() {
+  const rows = tradesData || [];
+  const winningTrades = rows.filter(t => Number(t.pnl || 0) > 0);
+  const losingTrades = rows.filter(t => Number(t.pnl || 0) < 0);
+  const totalPnl = rows.reduce((s,t) => s + Number(t.pnl || 0), 0);
+  const totalInvestedForTrades = rows.reduce((s,t) => s + (Number(t.buy_price || 0) * Number(t.qty || 0)), 0);
+  const avgProfit = winningTrades.length ? winningTrades.reduce((s,t) => s + Number(t.pnl || 0), 0) / winningTrades.length : 0;
+  const avgLoss = losingTrades.length ? losingTrades.reduce((s,t) => s + Math.abs(Number(t.pnl || 0)), 0) / losingTrades.length : 0;
+  const roi = totalInvestedForTrades ? (totalPnl / totalInvestedForTrades) * 100 : 0;
+  const summaryRows = [
+    ['Metric','Value'],
+    ['Total Trades', rows.length],
+    ['Total Winning Trades', winningTrades.length],
+    ['Total Losing Trades', losingTrades.length],
+    ['Realised P&L', totalPnl],
+    ['Win Rate %', rows.length ? ((winningTrades.length / rows.length) * 100).toFixed(2) : 0],
+    ['Average Profit', avgProfit],
+    ['Average Loss', avgLoss],
+    ['ROI %', roi.toFixed(2)],
+    [],
+  ];
+  const headers = ['Symbol','Quantity','Buy Price','Sell Price','Buy Date','Sell Date','P&L','P&L %'];
+  const csvRows = summaryRows.map(row => row.map(csvEscape).join(','));
+  csvRows.push(headers.join(','));
+  rows.forEach(t => {
+    csvRows.push([
+      t.symbol, t.qty, t.buy_price, t.sell_price, t.buy_date || '', t.sell_date || '',
+      Number(t.pnl || 0), Number(t.pnl_pct || 0)
+    ].map(csvEscape).join(','));
+  });
+  const blob = new Blob([csvRows.join('\n')], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `apexwealth_performance_${USER?.email || 'trades'}_${new Date().toISOString().slice(0,10)}.csv`;
   document.body.appendChild(a);
   a.click();
   a.remove();

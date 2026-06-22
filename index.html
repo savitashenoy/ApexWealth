@@ -1315,6 +1315,7 @@ body.light .pd-shell{background:linear-gradient(180deg,#f5f2eb,#edeae2)}body.lig
 
       <div class="tabs-bar">
         <button class="tab-btn active" onclick="switchPortTab('holdings')">Holdings</button>
+        <button class="tab-btn" onclick="switchPortTab('api-connect')">API Connect</button>
         <button class="tab-btn" onclick="switchPortTab('alerts')">Alerts</button>
         <button class="tab-btn" onclick="switchPortTab('performance')">Performance Report</button>
       </div>
@@ -1352,21 +1353,6 @@ body.light .pd-shell{background:linear-gradient(180deg,#f5f2eb,#edeae2)}body.lig
             </div>
           </div>
           <div class="auth-error" id="add-error" style="margin-top:8px"></div>
-          <div class="zerodha-panel" id="zerodha-panel">
-            <div class="zerodha-head">
-              <div><i class="fa fa-link"></i> Zerodha Execution Layer</div>
-              <span class="zerodha-status" id="zerodha-status-chip">Checking…</span>
-            </div>
-            <div class="zerodha-sub">Apex holdings/trades are updated only after Kite returns a confirmed COMPLETE order. Save your Kite API Key/Secret in Settings → API Settings before connecting.</div>
-            <div class="zerodha-actions">
-              <button class="btn btn-outline" onclick="openZerodhaLogin()"><i class="fa fa-arrow-up-right-from-square"></i> Connect Zerodha</button>
-              <input class="form-input zerodha-token-input" id="zerodha-request-token" placeholder="Paste request_token after Kite login"/>
-              <button class="btn btn-primary" onclick="saveZerodhaSession()"><i class="fa fa-key"></i> Save Token</button>
-              <button class="btn btn-outline" onclick="syncZerodhaHoldings()"><i class="fa fa-rotate"></i> Sync Holdings</button>
-              <button class="btn btn-outline" onclick="disconnectZerodha()"><i class="fa fa-unlink"></i> Disconnect</button>
-            </div>
-            <div class="zerodha-msg" id="zerodha-msg"></div>
-          </div>
         </div>
 
         <div class="portfolio-load-progress" id="holdings-load-progress">
@@ -1393,6 +1379,26 @@ body.light .pd-shell{background:linear-gradient(180deg,#f5f2eb,#edeae2)}body.lig
       </div>
 
 
+      <!-- API CONNECT TAB -->
+      <div class="tab-content" id="tab-api-connect">
+        <div class="zerodha-panel" id="zerodha-panel">
+          <div class="zerodha-head">
+            <div><i class="fa fa-link"></i> Zerodha Execution Layer</div>
+            <span class="zerodha-status" id="zerodha-status-chip">Checking…</span>
+          </div>
+          <div class="zerodha-sub">Apex holdings/trades are updated only after Kite returns a confirmed COMPLETE order. Save your Kite API Key/Secret in Settings → API Settings before connecting.</div>
+          <div class="zerodha-actions">
+            <button class="btn btn-outline" onclick="openZerodhaLogin()"><i class="fa fa-arrow-up-right-from-square"></i> Connect Zerodha</button>
+            <input class="form-input zerodha-token-input" id="zerodha-request-token" placeholder="Paste request_token after Kite login"/>
+            <button class="btn btn-primary" onclick="saveZerodhaSession()"><i class="fa fa-key"></i> Save Token</button>
+            <button class="btn btn-outline" onclick="syncZerodhaHoldings()"><i class="fa fa-rotate"></i> Sync Holdings</button>
+            <button class="btn btn-outline" onclick="disconnectZerodha()"><i class="fa fa-unlink"></i> Disconnect</button>
+          </div>
+          <div class="zerodha-msg" id="zerodha-msg"></div>
+        </div>
+      </div>
+
+
       <!-- ALERTS TAB -->
       <div class="tab-content" id="tab-alerts">
         <div class="tbl-section-title"><i class="fa fa-bell"></i> Portfolio Alerts</div>
@@ -1410,10 +1416,21 @@ body.light .pd-shell{background:linear-gradient(180deg,#f5f2eb,#edeae2)}body.lig
 
       <!-- PERFORMANCE REPORT TAB -->
       <div class="tab-content" id="tab-performance">
+        <div class="pd-title-row">
+          <div>
+            <h2>Performance Report</h2>
+            <p>Closed trade performance and realised P&L.</p>
+          </div>
+          <button class="btn btn-outline" onclick="exportPerformanceCSV()" style="padding:8px 12px"><i class="fa fa-file-csv"></i> Export CSV</button>
+        </div>
         <div class="perf-summary">
           <div class="card"><div class="card-label">Total Trades</div><div class="card-value" id="perf-total-trades">0</div></div>
+          <div class="card"><div class="card-label">Total Winning Trades</div><div class="card-value green" id="perf-winning-trades">0</div></div>
+          <div class="card"><div class="card-label">Total Losing Trades</div><div class="card-value red" id="perf-losing-trades">0</div></div>
           <div class="card"><div class="card-label">Realised P&L</div><div class="card-value td-mono" id="perf-realised">₹0</div></div>
           <div class="card"><div class="card-label">Win Rate</div><div class="card-value" id="perf-win-rate">0%</div></div>
+          <div class="card"><div class="card-label">Average Profit</div><div class="card-value green td-mono" id="perf-avg-profit">₹0</div></div>
+          <div class="card"><div class="card-label">Average Loss</div><div class="card-value red td-mono" id="perf-avg-loss">₹0</div></div>
           <div class="card"><div class="card-label">ROI</div><div class="card-value green td-mono" id="perf-best">0%</div></div>
         </div>
 
@@ -3386,7 +3403,7 @@ async function confirmEdit() {
 
 // PORTFOLIO TABS
 function switchPortTab(tab) {
-  const tabs = ['holdings','alerts','performance'];
+  const tabs = ['holdings','api-connect','alerts','performance'];
   document.querySelectorAll('#page-portfolio .tabs-bar .tab-btn').forEach((b,i) => {
     b.classList.toggle('active', tabs[i] === tab);
   });
@@ -3394,6 +3411,7 @@ function switchPortTab(tab) {
   const target = document.getElementById(`tab-${tab}`);
   if (target) target.classList.add('active');
   if (tab === 'performance') loadTrades();
+  if (tab === 'api-connect') refreshZerodhaStatus();
   if (tab === 'alerts') loadPortfolioAlerts();
 }
 
@@ -3436,9 +3454,13 @@ function renderAllocationCharts() {
 
 function resetPerformanceSummary() {
   document.getElementById('perf-total-trades').textContent = 0;
+  document.getElementById('perf-winning-trades').textContent = 0;
+  document.getElementById('perf-losing-trades').textContent = 0;
   document.getElementById('perf-realised').textContent = '₹0';
   document.getElementById('perf-realised').className = 'card-value td-mono';
   document.getElementById('perf-win-rate').textContent = '0%';
+  document.getElementById('perf-avg-profit').textContent = '₹0';
+  document.getElementById('perf-avg-loss').textContent = '₹0';
   document.getElementById('perf-best').textContent = '0%';
 }
 
@@ -3504,14 +3526,22 @@ async function loadTrades() {
     }
 
     const totalPnl = tradesData.reduce((s,t) => s + Number(t.pnl || 0), 0);
-    const wins = tradesData.filter(t => Number(t.pnl || 0) > 0).length;
+    const winningTrades = tradesData.filter(t => Number(t.pnl || 0) > 0);
+    const losingTrades = tradesData.filter(t => Number(t.pnl || 0) < 0);
+    const wins = winningTrades.length;
+    const avgProfit = winningTrades.length ? winningTrades.reduce((s,t) => s + Number(t.pnl || 0), 0) / winningTrades.length : 0;
+    const avgLoss = losingTrades.length ? losingTrades.reduce((s,t) => s + Math.abs(Number(t.pnl || 0)), 0) / losingTrades.length : 0;
     const totalInvestedForTrades = tradesData.reduce((s,t) => s + (Number(t.buy_price || 0) * Number(t.qty || 0)), 0);
     const roi = totalInvestedForTrades ? (totalPnl / totalInvestedForTrades) * 100 : 0;
 
     document.getElementById('perf-total-trades').textContent = tradesData.length;
+    document.getElementById('perf-winning-trades').textContent = winningTrades.length;
+    document.getElementById('perf-losing-trades').textContent = losingTrades.length;
     document.getElementById('perf-realised').textContent = `${totalPnl >= 0 ? '+' : ''}₹${fmtNum(totalPnl)}`;
     document.getElementById('perf-realised').className = `card-value td-mono ${totalPnl >= 0 ? 'green' : 'red'}`;
     document.getElementById('perf-win-rate').textContent = `${((wins/tradesData.length)*100).toFixed(0)}%`;
+    document.getElementById('perf-avg-profit').textContent = `₹${fmtNum(avgProfit)}`;
+    document.getElementById('perf-avg-loss').textContent = `₹${fmtNum(avgLoss)}`;
     document.getElementById('perf-best').textContent = `${roi >= 0 ? '+' : ''}${roi.toFixed(2)}%`;
     document.getElementById('perf-best').className = `card-value td-mono ${roi >= 0 ? 'green' : 'red'}`;
 
@@ -3728,6 +3758,47 @@ function exportPortfolioCSV() {
   const a = document.createElement('a');
   a.href = url;
   a.download = `apexwealth_portfolio_${USER?.email || 'holdings'}_${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportPerformanceCSV() {
+  const rows = tradesData || [];
+  const winningTrades = rows.filter(t => Number(t.pnl || 0) > 0);
+  const losingTrades = rows.filter(t => Number(t.pnl || 0) < 0);
+  const totalPnl = rows.reduce((s,t) => s + Number(t.pnl || 0), 0);
+  const totalInvestedForTrades = rows.reduce((s,t) => s + (Number(t.buy_price || 0) * Number(t.qty || 0)), 0);
+  const avgProfit = winningTrades.length ? winningTrades.reduce((s,t) => s + Number(t.pnl || 0), 0) / winningTrades.length : 0;
+  const avgLoss = losingTrades.length ? losingTrades.reduce((s,t) => s + Math.abs(Number(t.pnl || 0)), 0) / losingTrades.length : 0;
+  const roi = totalInvestedForTrades ? (totalPnl / totalInvestedForTrades) * 100 : 0;
+  const summaryRows = [
+    ['Metric','Value'],
+    ['Total Trades', rows.length],
+    ['Total Winning Trades', winningTrades.length],
+    ['Total Losing Trades', losingTrades.length],
+    ['Realised P&L', totalPnl],
+    ['Win Rate %', rows.length ? ((winningTrades.length / rows.length) * 100).toFixed(2) : 0],
+    ['Average Profit', avgProfit],
+    ['Average Loss', avgLoss],
+    ['ROI %', roi.toFixed(2)],
+    [],
+  ];
+  const headers = ['Symbol','Quantity','Buy Price','Sell Price','Buy Date','Sell Date','P&L','P&L %'];
+  const csvRows = summaryRows.map(row => row.map(csvEscape).join(','));
+  csvRows.push(headers.join(','));
+  rows.forEach(t => {
+    csvRows.push([
+      t.symbol, t.qty, t.buy_price, t.sell_price, t.buy_date || '', t.sell_date || '',
+      Number(t.pnl || 0), Number(t.pnl_pct || 0)
+    ].map(csvEscape).join(','));
+  });
+  const blob = new Blob([csvRows.join('\n')], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `apexwealth_performance_${USER?.email || 'trades'}_${new Date().toISOString().slice(0,10)}.csv`;
   document.body.appendChild(a);
   a.click();
   a.remove();
